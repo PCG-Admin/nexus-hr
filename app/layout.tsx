@@ -9,8 +9,8 @@ const _geist = Geist({ subsets: ["latin"] })
 const _geistMono = Geist_Mono({ subsets: ["latin"] })
 
 export const metadata: Metadata = {
-  title: "Leave Platform - BCEA Compliant",
-  description: "Leave Management System for South African Businesses",
+  title: "Nexus HR - Leave Platform",
+  description: "Leave Management System for Nexus HR",
   generator: "v0.app",
   icons: {
     icon: [
