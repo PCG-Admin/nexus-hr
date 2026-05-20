@@ -1,20 +1,16 @@
-# Leave platform
+# Nexus HR Leave Platform
 
-*Automatically synced with your [v0.app](https://v0.app) deployments*
-
-[![Deployed on Vercel](https://img.shields.io/badge/Deployed%20on-Vercel-black?style=for-the-badge&logo=vercel)](https://vercel.com/pcgs-projects-8758c50f/v0-leave-platform)
 [![Built with v0](https://img.shields.io/badge/Built%20with-v0.app-black?style=for-the-badge)](https://v0.app/chat/h9YHGHy3C7x)
 
 ## Overview
 
-This repository will stay in sync with your deployed chats on [v0.app](https://v0.app).
-Any changes you make to your deployed app will be automatically pushed to this repository from [v0.app](https://v0.app).
+Nexus HR Leave Platform — BCEA compliant leave management system.
 
 ## Deployment
 
 Your project is live at:
 
-**[https://vercel.com/pcgs-projects-8758c50f/v0-leave-platform](https://vercel.com/pcgs-projects-8758c50f/v0-leave-platform)**
+**[https://nexus-hr.mindriftsolutions.net](https://nexus-hr.mindriftsolutions.net)**
 
 ## Build your app
 
