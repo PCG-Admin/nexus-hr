@@ -14,11 +14,9 @@ export const metadata: Metadata = {
   generator: "v0.app",
   icons: {
     icon: [
-      { url: "/favicons/favicon.ico", sizes: "any" },
-      { url: "/favicons/favicon-16x16.png", sizes: "16x16", type: "image/png" },
-      { url: "/favicons/favicon-32x32.png", sizes: "32x32", type: "image/png" },
+      { url: "/XLNEXUSLOGO.png", sizes: "any" },
     ],
-    apple: "/favicons/apple-touch-icon.png",
+    apple: "/XLNEXUSLOGO.png",
   },
   manifest: "/favicons/site.webmanifest",
 }

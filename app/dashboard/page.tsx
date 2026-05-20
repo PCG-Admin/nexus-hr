@@ -42,7 +42,7 @@ export default function DashboardPage() {
 
       setIsLoadingData(true)
 
-      const dbReady = process.env.NEXT_PUBLIC_SUPABASE_URL !== 'https://placeholder.supabase.co'
+      const dbReady = !!(process.env.NEXT_PUBLIC_SUPABASE_URL && !process.env.NEXT_PUBLIC_SUPABASE_URL.includes('placeholder'))
       if (!dbReady) {
         setLeaveBalances(DEMO_BALANCES)
         setIsLoadingData(false)

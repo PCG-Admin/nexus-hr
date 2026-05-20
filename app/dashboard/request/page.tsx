@@ -69,7 +69,7 @@ export default function RequestLeavePage() {
 
       setIsLoadingData(true)
 
-      const dbReady = process.env.NEXT_PUBLIC_SUPABASE_URL !== 'https://placeholder.supabase.co'
+      const dbReady = !!(process.env.NEXT_PUBLIC_SUPABASE_URL && !process.env.NEXT_PUBLIC_SUPABASE_URL.includes('placeholder'))
       if (!dbReady) {
         setAvailableTypes(DEMO_TYPES)
         setUserBalances(DEMO_BALANCES)

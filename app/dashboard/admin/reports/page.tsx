@@ -43,7 +43,7 @@ export default function ReportsPage() {
 
   const fetchData = useCallback(async () => {
     setIsLoadingData(true)
-    const dbReady = process.env.NEXT_PUBLIC_SUPABASE_URL !== 'https://placeholder.supabase.co'
+    const dbReady = !!(process.env.NEXT_PUBLIC_SUPABASE_URL && !process.env.NEXT_PUBLIC_SUPABASE_URL.includes('placeholder'))
     if (!dbReady) {
       setIsLoadingData(false)
       return
