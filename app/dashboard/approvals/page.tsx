@@ -30,6 +30,12 @@ export default function ApprovalsPage() {
 
   const fetchRequests = useCallback(async () => {
     setIsLoadingRequests(true)
+    const dbReady = process.env.NEXT_PUBLIC_SUPABASE_URL !== 'https://placeholder.supabase.co'
+    if (!dbReady) {
+      setAllRequests([])
+      setIsLoadingRequests(false)
+      return
+    }
     const requests = await getAllLeaveRequests()
     setAllRequests(requests)
     setIsLoadingRequests(false)

@@ -43,6 +43,11 @@ export default function ReportsPage() {
 
   const fetchData = useCallback(async () => {
     setIsLoadingData(true)
+    const dbReady = process.env.NEXT_PUBLIC_SUPABASE_URL !== 'https://placeholder.supabase.co'
+    if (!dbReady) {
+      setIsLoadingData(false)
+      return
+    }
     const [employeesData, requestsData, balancesData] = await Promise.all([
       getAllEmployees(),
       getAllLeaveRequests(),
