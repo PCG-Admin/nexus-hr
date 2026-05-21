@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
 import type { LeaveRequestWithEmployee } from "@/lib/supabase/leave-service"
-import { Calendar, Clock, UserIcon, CheckCircle2, XCircle, FileText, Download } from "lucide-react"
+import { Calendar, Clock, UserIcon, CheckCircle2, XCircle, FileText, Download, AlertTriangle } from "lucide-react"
 import { format } from "date-fns"
 
 type ApprovalRequestCardProps = {
@@ -51,8 +51,8 @@ export function ApprovalRequestCard({ request, onApprove, onReject, isLoading }:
           {/* Employee Info */}
           <div className="flex items-start justify-between">
             <div className="space-y-1">
-              <div className="flex items-center gap-2">
-                <UserIcon className="w-4 h-4 text-muted-foreground" />
+              <div className="flex items-center gap-2 flex-wrap">
+                <UserIcon className="w-4 h-4 text-muted-foreground shrink-0" />
                 <h4 className="font-semibold">
                   {request.employee.firstName} {request.employee.lastName}
                 </h4>
@@ -64,10 +64,28 @@ export function ApprovalRequestCard({ request, onApprove, onReject, isLoading }:
               </div>
               <p className="text-sm text-muted-foreground">{request.employee.department || 'No department'}</p>
             </div>
-            <Badge className="bg-amber-100 text-amber-800 border-amber-300" variant="outline">
-              Pending Review
-            </Badge>
+            <div className="flex flex-col items-end gap-1.5">
+              <Badge className="bg-amber-100 text-amber-800 border-amber-300" variant="outline">
+                Pending Review
+              </Badge>
+              {request.isOverride && (
+                <Badge className="bg-orange-100 text-orange-800 border-orange-300 gap-1" variant="outline">
+                  <AlertTriangle className="w-3 h-3" />
+                  Balance Override
+                </Badge>
+              )}
+            </div>
           </div>
+
+          {/* Override notice */}
+          {request.isOverride && (
+            <div className="flex items-start gap-2 px-3 py-2.5 rounded-lg bg-orange-50 border border-orange-200 text-xs text-orange-800">
+              <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+              <span>
+                This request exceeds the employee's available leave balance. Approving constitutes a formal override — ensure this is authorised.
+              </span>
+            </div>
+          )}
 
           {/* Leave Details */}
           <div className="space-y-2 p-4 bg-muted/50 rounded-lg">

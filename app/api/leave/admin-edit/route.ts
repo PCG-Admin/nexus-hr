@@ -17,12 +17,12 @@ export async function POST(request: Request) {
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
     const { data: profile } = await supabase
-      .from('profiles')
+      .from('employees' as any)
       .select('role')
       .eq('id', user.id)
       .single()
 
-    if (!profile || (profile.role !== 'admin' && profile.role !== 'manager' && profile.role !== 'ceo')) {
+    if (!profile || !['hr_manager', 'system_admin', 'line_manager'].includes((profile as any).role)) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
 

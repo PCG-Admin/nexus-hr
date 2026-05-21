@@ -23,11 +23,42 @@ import { Alert, AlertDescription } from "@/components/ui/alert"
 import { AlertCircle, CheckCircle2 } from "lucide-react"
 import { type User } from "@/lib/auth"
 
+export type ProfileAuditEntry = {
+  id: string
+  timestamp: string
+  changedByName: string
+  changes: { label: string; from: string | null; to: string | null }[]
+}
+
 type ProfileEditDialogProps = {
   user: User
   isOpen: boolean
   onClose: () => void
   onSave: (updates: Partial<User>) => Promise<void>
+}
+
+const FIELD_META: { key: keyof User; label: string }[] = [
+  { key: "phone",                        label: "Mobile Number" },
+  { key: "personalEmail",                label: "Personal Email" },
+  { key: "address",                      label: "Street Address" },
+  { key: "city",                         label: "City" },
+  { key: "postalCode",                   label: "Postal Code" },
+  { key: "emergencyContactName",         label: "Emergency Contact Name" },
+  { key: "emergencyContactPhone",        label: "Emergency Contact Phone" },
+  { key: "emergencyContactRelationship", label: "Emergency Contact Relationship" },
+]
+
+function buildAuditChanges(
+  user: User,
+  formData: Record<string, string>,
+): ProfileAuditEntry["changes"] {
+  return FIELD_META
+    .map(({ key, label }) => {
+      const prev = (user[key] as string | null) ?? null
+      const next = formData[key]?.trim() || null
+      return prev !== next ? { label, from: prev, to: next } : null
+    })
+    .filter((c): c is NonNullable<typeof c> => c !== null)
 }
 
 export function ProfileEditDialog({ user, isOpen, onClose, onSave }: ProfileEditDialogProps) {
@@ -48,13 +79,13 @@ export function ProfileEditDialog({ user, isOpen, onClose, onSave }: ProfileEdit
   useEffect(() => {
     if (user && isOpen) {
       setFormData({
-        phone: user.phone ?? "",
-        personalEmail: user.personalEmail ?? "",
-        address: user.address ?? "",
-        city: user.city ?? "",
-        postalCode: user.postalCode ?? "",
-        emergencyContactName: user.emergencyContactName ?? "",
-        emergencyContactPhone: user.emergencyContactPhone ?? "",
+        phone:                        user.phone                        ?? "",
+        personalEmail:                user.personalEmail                ?? "",
+        address:                      user.address                      ?? "",
+        city:                         user.city                         ?? "",
+        postalCode:                   user.postalCode                   ?? "",
+        emergencyContactName:         user.emergencyContactName         ?? "",
+        emergencyContactPhone:        user.emergencyContactPhone        ?? "",
         emergencyContactRelationship: user.emergencyContactRelationship ?? "",
       })
       setError("")
@@ -64,18 +95,47 @@ export function ProfileEditDialog({ user, isOpen, onClose, onSave }: ProfileEdit
 
   const handleSave = async () => {
     setError("")
+
+    // Mandatory field validation
+    const missing: string[] = []
+    if (!formData.phone.trim())                missing.push("Mobile Number")
+    if (!formData.emergencyContactName.trim()) missing.push("Emergency Contact Name")
+    if (!formData.emergencyContactPhone.trim())missing.push("Emergency Contact Phone")
+
+    if (missing.length > 0) {
+      setError(`The following required fields must be completed: ${missing.join(", ")}`)
+      return
+    }
+
+    // Build audit diff before saving
+    const changes = buildAuditChanges(user, formData)
+
     setIsSaving(true)
     try {
       await onSave({
-        phone: formData.phone || null,
-        personalEmail: formData.personalEmail || null,
-        address: formData.address || null,
-        city: formData.city || null,
-        postalCode: formData.postalCode || null,
-        emergencyContactName: formData.emergencyContactName || null,
-        emergencyContactPhone: formData.emergencyContactPhone || null,
+        phone:                        formData.phone                        || null,
+        personalEmail:                formData.personalEmail                || null,
+        address:                      formData.address                      || null,
+        city:                         formData.city                         || null,
+        postalCode:                   formData.postalCode                   || null,
+        emergencyContactName:         formData.emergencyContactName         || null,
+        emergencyContactPhone:        formData.emergencyContactPhone        || null,
         emergencyContactRelationship: formData.emergencyContactRelationship || null,
       })
+
+      // Persist audit entry to localStorage if there were changes
+      if (changes.length > 0) {
+        const entry: ProfileAuditEntry = {
+          id:            `pa-${Date.now()}`,
+          timestamp:     new Date().toISOString(),
+          changedByName: `${user.firstName} ${user.lastName}`,
+          changes,
+        }
+        const storageKey = `profile-audit-${user.id}`
+        const existing: ProfileAuditEntry[] = JSON.parse(localStorage.getItem(storageKey) ?? "[]")
+        localStorage.setItem(storageKey, JSON.stringify([entry, ...existing].slice(0, 50)))
+      }
+
       setSaved(true)
       setTimeout(onClose, 800)
     } catch {
@@ -85,13 +145,16 @@ export function ProfileEditDialog({ user, isOpen, onClose, onSave }: ProfileEdit
     }
   }
 
+  const set = (field: string) => (e: React.ChangeEvent<HTMLInputElement>) =>
+    setFormData(prev => ({ ...prev, [field]: e.target.value }))
+
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="sm:max-w-[540px] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Edit My Profile</DialogTitle>
           <DialogDescription>
-            Update your contact details and emergency contact information.
+            Update your contact details and emergency contact information. Fields marked * are required.
           </DialogDescription>
         </DialogHeader>
 
@@ -114,11 +177,11 @@ export function ProfileEditDialog({ user, isOpen, onClose, onSave }: ProfileEdit
             <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Contact</p>
             <div className="space-y-3">
               <div className="space-y-1.5">
-                <Label htmlFor="phone">Mobile Number</Label>
+                <Label htmlFor="phone">Mobile Number <span className="text-red-500">*</span></Label>
                 <Input
                   id="phone"
                   value={formData.phone}
-                  onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                  onChange={set("phone")}
                   placeholder="+27 82 000 0000"
                   disabled={isSaving}
                 />
@@ -129,7 +192,7 @@ export function ProfileEditDialog({ user, isOpen, onClose, onSave }: ProfileEdit
                   id="personalEmail"
                   type="email"
                   value={formData.personalEmail}
-                  onChange={(e) => setFormData({ ...formData, personalEmail: e.target.value })}
+                  onChange={set("personalEmail")}
                   placeholder="yourname@gmail.com"
                   disabled={isSaving}
                 />
@@ -146,7 +209,7 @@ export function ProfileEditDialog({ user, isOpen, onClose, onSave }: ProfileEdit
                 <Input
                   id="address"
                   value={formData.address}
-                  onChange={(e) => setFormData({ ...formData, address: e.target.value })}
+                  onChange={set("address")}
                   placeholder="12 Oak Street, Sandton"
                   disabled={isSaving}
                 />
@@ -157,7 +220,7 @@ export function ProfileEditDialog({ user, isOpen, onClose, onSave }: ProfileEdit
                   <Input
                     id="city"
                     value={formData.city}
-                    onChange={(e) => setFormData({ ...formData, city: e.target.value })}
+                    onChange={set("city")}
                     placeholder="Johannesburg"
                     disabled={isSaving}
                   />
@@ -167,7 +230,7 @@ export function ProfileEditDialog({ user, isOpen, onClose, onSave }: ProfileEdit
                   <Input
                     id="postalCode"
                     value={formData.postalCode}
-                    onChange={(e) => setFormData({ ...formData, postalCode: e.target.value })}
+                    onChange={set("postalCode")}
                     placeholder="2196"
                     disabled={isSaving}
                   />
@@ -181,22 +244,22 @@ export function ProfileEditDialog({ user, isOpen, onClose, onSave }: ProfileEdit
             <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Emergency Contact</p>
             <div className="space-y-3">
               <div className="space-y-1.5">
-                <Label htmlFor="emergencyContactName">Full Name</Label>
+                <Label htmlFor="emergencyContactName">Full Name <span className="text-red-500">*</span></Label>
                 <Input
                   id="emergencyContactName"
                   value={formData.emergencyContactName}
-                  onChange={(e) => setFormData({ ...formData, emergencyContactName: e.target.value })}
+                  onChange={set("emergencyContactName")}
                   placeholder="Contact full name"
                   disabled={isSaving}
                 />
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1.5">
-                  <Label htmlFor="emergencyContactPhone">Phone</Label>
+                  <Label htmlFor="emergencyContactPhone">Phone <span className="text-red-500">*</span></Label>
                   <Input
                     id="emergencyContactPhone"
                     value={formData.emergencyContactPhone}
-                    onChange={(e) => setFormData({ ...formData, emergencyContactPhone: e.target.value })}
+                    onChange={set("emergencyContactPhone")}
                     placeholder="+27 71 000 0000"
                     disabled={isSaving}
                   />
@@ -205,7 +268,7 @@ export function ProfileEditDialog({ user, isOpen, onClose, onSave }: ProfileEdit
                   <Label htmlFor="emergencyContactRelationship">Relationship</Label>
                   <Select
                     value={formData.emergencyContactRelationship}
-                    onValueChange={(v) => setFormData({ ...formData, emergencyContactRelationship: v })}
+                    onValueChange={(v) => setFormData(prev => ({ ...prev, emergencyContactRelationship: v }))}
                     disabled={isSaving}
                   >
                     <SelectTrigger>

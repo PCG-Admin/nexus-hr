@@ -23,6 +23,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { AlertCircle } from "lucide-react"
 import { type UserRole } from "@/lib/auth"
+import { getOrgConfig } from "@/lib/org-config"
 
 type AddEmployeeDialogProps = {
   isOpen: boolean
@@ -58,6 +59,7 @@ export function AddEmployeeDialog({ isOpen, onClose, onSuccess }: AddEmployeeDia
   const [formData, setFormData] = useState(EMPTY)
   const [error, setError] = useState("")
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [orgConfig, setOrgConfig] = useState(() => getOrgConfig())
 
   const set = (field: keyof typeof EMPTY) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setFormData((prev) => ({ ...prev, [field]: e.target.value }))
@@ -125,6 +127,7 @@ export function AddEmployeeDialog({ isOpen, onClose, onSuccess }: AddEmployeeDia
   const handleClose = () => {
     setFormData(EMPTY)
     setError("")
+    setOrgConfig(getOrgConfig())
     onClose()
   }
 
@@ -225,21 +228,31 @@ export function AddEmployeeDialog({ isOpen, onClose, onSuccess }: AddEmployeeDia
                   >
                     <SelectTrigger><SelectValue placeholder="Select department" /></SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="Technical">Technical</SelectItem>
-                      <SelectItem value="Sales">Sales</SelectItem>
-                      <SelectItem value="Management">Management</SelectItem>
-                      <SelectItem value="Marketing">Marketing</SelectItem>
-                      <SelectItem value="Human Resources">Human Resources</SelectItem>
-                      <SelectItem value="Administration">Administration</SelectItem>
-                      <SelectItem value="Executive">Executive</SelectItem>
+                      {orgConfig.departments.map(d => (
+                        <SelectItem key={d} value={d}>{d}</SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>
               </div>
 
               <div className="grid grid-cols-2 gap-4">
-                {field("grade",          "Grade",           "number", "1")}
-                {field("employeeNumber", "Employee Number", "text",   "EMP001")}
+                <div className="space-y-1.5">
+                  <Label>Grade</Label>
+                  <Select
+                    value={formData.grade}
+                    onValueChange={(v) => setFormData((p) => ({ ...p, grade: v }))}
+                    disabled={isSubmitting}
+                  >
+                    <SelectTrigger><SelectValue placeholder="Select grade" /></SelectTrigger>
+                    <SelectContent>
+                      {orgConfig.grades.map(g => (
+                        <SelectItem key={g} value={g.toString()}>Grade {g}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                {field("employeeNumber", "Employee Number", "text", "EMP001")}
               </div>
               {field("hireDate", "Hire Date", "date")}
             </TabsContent>

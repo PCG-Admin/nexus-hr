@@ -31,12 +31,12 @@ export async function DELETE(request: Request) {
 
     // Check if current user is an admin
     const { data: profile } = await supabase
-      .from('profiles')
+      .from('employees' as any)
       .select('role')
       .eq('id', currentUser.id)
       .single()
 
-    if (!profile || (profile.role !== 'admin' && profile.role !== 'ceo')) {
+    if (!profile || !['hr_manager', 'system_admin'].includes((profile as any).role)) {
       return NextResponse.json({ error: 'Forbidden - Admin access required' }, { status: 403 })
     }
 
@@ -67,9 +67,9 @@ export async function DELETE(request: Request) {
       .delete()
       .eq('user_id', userId)
 
-    // Delete profile
+    // Delete employee record
     await supabaseAdmin
-      .from('profiles')
+      .from('employees' as any)
       .delete()
       .eq('id', userId)
 

@@ -23,8 +23,10 @@ import {
   Hash,
   GraduationCap,
   BadgeCheck,
+  History,
 } from "lucide-react"
 import { format } from "date-fns"
+import type { ProfileAuditEntry } from "@/components/profile-edit-dialog"
 
 const ROLE_LABELS: Record<string, string> = {
   employee:     "Employee",
@@ -98,6 +100,15 @@ export default function ProfilePage() {
   const { user, isLoading, updateUser } = useAuth()
   const router = useRouter()
   const [isEditOpen, setIsEditOpen] = useState(false)
+  const [auditHistory, setAuditHistory] = useState<ProfileAuditEntry[]>([])
+
+  useEffect(() => {
+    if (!user) return
+    const stored: ProfileAuditEntry[] = JSON.parse(
+      localStorage.getItem(`profile-audit-${user.id}`) ?? "[]"
+    )
+    setAuditHistory(stored)
+  }, [user, isEditOpen])
 
   useEffect(() => {
     if (!isLoading && !user) router.push("/")
@@ -227,6 +238,10 @@ export default function ProfilePage() {
               <UserIcon className="w-3.5 h-3.5" />
               Identity
             </TabsTrigger>
+            <TabsTrigger value="history" className="gap-1.5">
+              <History className="w-3.5 h-3.5" />
+              History
+            </TabsTrigger>
           </TabsList>
 
           {/* Employment tab */}
@@ -316,6 +331,69 @@ export default function ProfilePage() {
                   <Field icon={Calendar} label="Date of Birth"        value={user.dateOfBirth ? format(new Date(user.dateOfBirth), "d MMMM yyyy") : null} />
                 </div>
                 <SensitiveNotice />
+              </CardContent>
+            </Card>
+          </TabsContent>
+          {/* Profile change history tab */}
+          <TabsContent value="history">
+            <Card>
+              <CardContent className="pt-6">
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-4">Profile Change History</p>
+                {auditHistory.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-12 text-center">
+                    <History className="w-10 h-10 text-muted-foreground/30 mb-3" />
+                    <p className="text-sm font-medium text-muted-foreground">No profile changes recorded yet.</p>
+                    <p className="text-xs text-muted-foreground/70 mt-1">Changes you make to your profile will appear here.</p>
+                  </div>
+                ) : (
+                  <div className="rounded-lg border overflow-hidden">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="bg-muted/50 border-b">
+                          <th className="text-left text-xs font-semibold text-muted-foreground px-4 py-2.5 w-40">Date & Time</th>
+                          <th className="text-left text-xs font-semibold text-muted-foreground px-4 py-2.5 w-36">Field</th>
+                          <th className="text-left text-xs font-semibold text-muted-foreground px-4 py-2.5">Previous</th>
+                          <th className="text-left text-xs font-semibold text-muted-foreground px-4 py-2.5">Updated To</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {auditHistory.flatMap((entry) =>
+                          entry.changes.map((c, i) => (
+                            <tr
+                              key={`${entry.id}-${i}`}
+                              className="border-b last:border-0 hover:bg-muted/20 transition-colors"
+                            >
+                              {i === 0 ? (
+                                <td
+                                  className="px-4 py-3 align-top text-xs text-muted-foreground whitespace-nowrap"
+                                  rowSpan={entry.changes.length}
+                                >
+                                  <span className="font-medium text-foreground block">
+                                    {format(new Date(entry.timestamp), "d MMM yyyy")}
+                                  </span>
+                                  <span>{format(new Date(entry.timestamp), "HH:mm")}</span>
+                                </td>
+                              ) : null}
+                              <td className="px-4 py-3 text-xs font-medium text-muted-foreground whitespace-nowrap">
+                                {c.label}
+                              </td>
+                              <td className="px-4 py-3 text-xs">
+                                <span className="inline-block bg-red-50 text-red-700 border border-red-100 rounded px-2 py-0.5 max-w-[180px] truncate" title={c.from ?? "—"}>
+                                  {c.from ?? <span className="italic text-red-400">empty</span>}
+                                </span>
+                              </td>
+                              <td className="px-4 py-3 text-xs">
+                                <span className="inline-block bg-emerald-50 text-emerald-700 border border-emerald-100 rounded px-2 py-0.5 max-w-[180px] truncate" title={c.to ?? "—"}>
+                                  {c.to ?? <span className="italic text-emerald-400">cleared</span>}
+                                </span>
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </CardContent>
             </Card>
           </TabsContent>

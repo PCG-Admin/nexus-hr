@@ -31,6 +31,7 @@ import {
   Legend,
 } from "recharts"
 import { format, startOfMonth, endOfMonth, eachMonthOfInterval, subMonths } from "date-fns"
+import { DEMO_EMPLOYEES, DEMO_LEAVE_REQUESTS } from "@/lib/demo-data"
 
 export default function ReportsPage() {
   const { user, isLoading } = useAuth()
@@ -44,10 +45,49 @@ export default function ReportsPage() {
   const fetchData = useCallback(async () => {
     setIsLoadingData(true)
     const dbReady = !!(process.env.NEXT_PUBLIC_SUPABASE_URL && !process.env.NEXT_PUBLIC_SUPABASE_URL.includes('placeholder'))
+
     if (!dbReady) {
+      // Wire demo data so charts render without a database
+      const LEAVE_TOTALS: Record<string, number> = {
+        "demo-annual":    15,
+        "demo-sick":      10,
+        "demo-family":     3,
+        "demo-maternity": 120,
+        "demo-parental":  10,
+      }
+      const LEAVE_NAMES: Record<string, string> = {
+        "demo-annual":    "Annual Leave",
+        "demo-sick":      "Sick Leave",
+        "demo-family":    "Family Responsibility",
+        "demo-maternity": "Maternity Leave",
+        "demo-parental":  "Parental Leave",
+      }
+      const syntheticBalances: LeaveBalanceWithEmployee[] = DEMO_EMPLOYEES.flatMap(emp =>
+        Object.entries(LEAVE_TOTALS).map(([typeId, totalDays]) => {
+          const usedDays = DEMO_LEAVE_REQUESTS
+            .filter(r => r.userId === emp.id && r.leaveTypeId === typeId && r.status === "approved")
+            .reduce((sum, r) => sum + r.daysRequested, 0)
+          return {
+            id: `bal-${emp.id}-${typeId}`,
+            userId: emp.id,
+            leaveTypeId: typeId,
+            leaveTypeName: LEAVE_NAMES[typeId],
+            totalDays,
+            usedDays,
+            availableDays: totalDays - usedDays,
+            year: 2026,
+            color: null,
+            employee: emp,
+          }
+        })
+      )
+      setEmployees(DEMO_EMPLOYEES)
+      setAllRequests(DEMO_LEAVE_REQUESTS)
+      setLeaveBalances(syntheticBalances)
       setIsLoadingData(false)
       return
     }
+
     const [employeesData, requestsData, balancesData] = await Promise.all([
       getAllEmployees(),
       getAllLeaveRequests(),

@@ -14,11 +14,9 @@ type LeaveRequestInsert = Database['public']['Tables']['leave_requests']['Insert
 export type LeaveType = {
   id: string
   name: string
-  description: string | null
-  defaultDaysPerYear: number
-  accrualType: 'annual' | 'monthly' | 'fixed'
-  requiresDocumentation: boolean
+  defaultDays: number
   color: string | null
+  requiresDocumentation?: boolean
 }
 
 export type LeaveBalance = {
@@ -51,6 +49,7 @@ export type LeaveRequest = {
   documentUrl: string | null
   createdAt: string
   updatedAt: string
+  isOverride?: boolean
 }
 
 // Fetch all leave types
@@ -67,11 +66,9 @@ export async function getLeaveTypes(): Promise<LeaveType[]> {
   return (data as LeaveTypeRow[]).map(row => ({
     id: row.id,
     name: row.name,
-    description: row.description,
-    defaultDaysPerYear: row.default_days_per_year,
-    accrualType: row.accrual_type,
-    requiresDocumentation: row.requires_documentation,
+    defaultDays: row.default_days,
     color: row.color,
+    requiresDocumentation: false,
   }))
 }
 
@@ -98,8 +95,7 @@ export async function getLeaveBalances(userId: string, year?: number): Promise<L
 
   if (balancesResult.error) return []
 
-  // Sum approved days per leave type directly from requests (always accurate,
-  // avoids depending on the cached used_days column being up-to-date)
+  // Sum approved days per leave type directly from requests (always accurate)
   const usedByType: Record<string, number> = {}
   if (requestsResult.data) {
     for (const req of requestsResult.data) {
@@ -107,7 +103,7 @@ export async function getLeaveBalances(userId: string, year?: number): Promise<L
     }
   }
 
-  return (balancesResult.data as (LeaveBalanceRow & { leave_types: { name: string; color: string | null } })[]).map(row => {
+  return (balancesResult.data as unknown as (LeaveBalanceRow & { leave_types: { name: string; color: string | null } })[]).map(row => {
     const usedDays = usedByType[row.leave_type_id] || 0
     return {
       id: row.id,
@@ -141,7 +137,7 @@ export async function getLeaveRequests(userId: string): Promise<LeaveRequest[]> 
 
   if (error) return []
 
-  return (data as (LeaveRequestRow & { leave_types: { name: string } })[]).map(row => ({
+  return (data as unknown as (LeaveRequestRow & { leave_types: { name: string } })[]).map(row => ({
     id: row.id,
     userId: row.user_id,
     leaveTypeId: row.leave_type_id,
@@ -208,7 +204,7 @@ export async function submitLeaveRequest(request: {
     return { success: false, error: error.message }
   }
 
-  const row = data as LeaveRequestRow & { leave_types: { name: string } }
+  const row = data as unknown as LeaveRequestRow & { leave_types: { name: string } }
 
   // Notify the right audience based on initial status
   fetch('/api/notifications/create', {
@@ -221,7 +217,7 @@ export async function submitLeaveRequest(request: {
       startDate: row.start_date,
       endDate: row.end_date,
       daysRequested: row.days_requested,
-      targetRoles: isElevatedRole ? ['ceo'] : ['admin', 'manager'],
+      targetRoles: isElevatedRole ? ['hr_manager', 'system_admin'] : ['hr_manager', 'system_admin', 'line_manager'],
       title: isElevatedRole ? 'Leave Request Awaiting Your Approval' : 'New Leave Request',
     }),
   }).catch(err => console.error('Failed to send notifications:', err))
@@ -297,6 +293,7 @@ export type Employee = {
   managerId: string | null
   idNumber: string | null
   dateOfBirth: string | null
+  isActive: boolean
 }
 
 // Extended leave request with employee info for approvals
@@ -316,7 +313,7 @@ export async function getAllLeaveRequests(): Promise<LeaveRequestWithEmployee[]>
       leave_types (
         name
       ),
-      profiles!leave_requests_user_id_fkey (
+      employees!leave_requests_user_id_fkey (
         id,
         email,
         first_name,
@@ -324,29 +321,45 @@ export async function getAllLeaveRequests(): Promise<LeaveRequestWithEmployee[]>
         employee_number,
         department,
         role,
-        hire_date
+        grade,
+        job_title,
+        employment_type,
+        hire_date,
+        manager_id,
+        phone,
+        personal_email,
+        address,
+        city,
+        postal_code,
+        emergency_contact_name,
+        emergency_contact_phone,
+        emergency_contact_relationship,
+        id_number,
+        date_of_birth,
+        is_active
       )
     `)
     .order('created_at', { ascending: false })
 
   if (error) return []
 
-  type RequestWithProfile = LeaveRequestRow & {
+  type RequestWithEmployee = LeaveRequestRow & {
     leave_types: { name: string }
-    profiles: {
-      id: string
-      email: string
-      first_name: string
-      last_name: string
-      employee_number: string | null
-      department: string | null
-      role: 'employee' | 'manager' | 'admin' | 'ceo'
-      hire_date: string | null
+    employees: {
+      id: string; email: string; first_name: string; last_name: string
+      employee_number: string | null; department: string | null; role: UserRole
+      grade: number | null; job_title: string | null
+      employment_type: 'permanent' | 'fixed_term' | 'probation' | null
+      hire_date: string | null; manager_id: string | null; phone: string | null
+      personal_email: string | null; address: string | null; city: string | null
+      postal_code: string | null; emergency_contact_name: string | null
+      emergency_contact_phone: string | null; emergency_contact_relationship: string | null
+      id_number: string | null; date_of_birth: string | null; is_active: boolean
     }
   }
 
-  return (data as RequestWithProfile[])
-    .filter(row => row.profiles !== null)
+  return (data as unknown as RequestWithEmployee[])
+    .filter(row => row.employees !== null)
     .map(row => ({
       id: row.id,
       userId: row.user_id,
@@ -366,46 +379,34 @@ export async function getAllLeaveRequests(): Promise<LeaveRequestWithEmployee[]>
       createdAt: row.created_at,
       updatedAt: row.updated_at,
       employee: {
-        id: row.profiles.id,
-        email: row.profiles.email,
-        firstName: row.profiles.first_name,
-        lastName: row.profiles.last_name,
-        employeeNumber: row.profiles.employee_number,
-        department: row.profiles.department,
-        role: row.profiles.role,
-        hireDate: row.profiles.hire_date,
+        id: row.employees.id,
+        email: row.employees.email,
+        firstName: row.employees.first_name,
+        lastName: row.employees.last_name,
+        employeeNumber: row.employees.employee_number,
+        department: row.employees.department,
+        role: row.employees.role,
+        grade: row.employees.grade,
+        jobTitle: row.employees.job_title,
+        employmentType: row.employees.employment_type,
+        hireDate: row.employees.hire_date,
+        managerId: row.employees.manager_id,
+        phone: row.employees.phone,
+        personalEmail: row.employees.personal_email,
+        address: row.employees.address,
+        city: row.employees.city,
+        postalCode: row.employees.postal_code,
+        emergencyContactName: row.employees.emergency_contact_name,
+        emergencyContactPhone: row.employees.emergency_contact_phone,
+        emergencyContactRelationship: row.employees.emergency_contact_relationship,
+        idNumber: row.employees.id_number,
+        dateOfBirth: row.employees.date_of_birth,
+        isActive: row.employees.is_active,
       },
     }))
 }
 
-// Helper to calculate days elapsed for a leave request
-function calculateElapsedDays(startDate: string, endDate: string, daysRequested: number): number {
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
-
-  const start = new Date(startDate)
-  start.setHours(0, 0, 0, 0)
-
-  const end = new Date(endDate)
-  end.setHours(0, 0, 0, 0)
-
-  // If leave hasn't started yet, no days used
-  if (start > today) {
-    return 0
-  }
-
-  // If leave is complete, use the full days requested
-  if (end <= today) {
-    return daysRequested
-  }
-
-  // Leave is in progress - count days from start to today (inclusive)
-  const diffTime = today.getTime() - start.getTime()
-  const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24)) + 1
-  return Math.min(diffDays, daysRequested)
-}
-
-// Manager stage-1 approval — moves request to pending_ceo and notifies CEO
+// Manager stage-1 approval — moves request to pending_ceo and notifies HR/admin
 export async function managerApproveLeaveRequest(
   requestId: string,
   managerId: string,
@@ -441,17 +442,17 @@ export async function managerApproveLeaveRequest(
         startDate: names.startDate,
         endDate: names.endDate,
         daysRequested: names.daysRequested,
-        targetRoles: ['ceo'],
+        targetRoles: ['hr_manager', 'system_admin'],
         title: 'Leave Request Awaiting Your Approval',
-        message: `${names.managerName} approved ${names.employeeName}'s ${names.leaveTypeName} request (${names.daysRequested} day(s)). Awaiting your final approval.`,
+        message: `${names.managerName} approved ${names.employeeName}'s ${names.leaveTypeName} request (${names.daysRequested} day(s)). Awaiting final approval.`,
       }),
-    }).catch(err => console.error('Failed to notify CEO:', err))
+    }).catch(err => console.error('Failed to notify HR:', err))
   }
 
   return { success: true }
 }
 
-// CEO final approval — moves request to approved
+// Final approval — moves request to approved
 export async function approveLeaveRequest(
   requestId: string,
   reviewerId: string,
@@ -507,41 +508,42 @@ export async function rejectLeaveRequest(
 
 // ============ Admin Functions ============
 
-// Fetch all employees (profiles)
+// Fetch all employees
 export async function getAllEmployees(): Promise<Employee[]> {
   if (!isDbConfigured()) return []
   const supabase = createClient()
 
   const { data, error } = await supabase
-    .from('profiles')
+    .from('employees')
     .select('*')
     .order('last_name')
 
   if (error) return []
 
-  return data.map(row => ({
-    id: row.id,
-    email: row.email,
-    firstName: row.first_name,
-    lastName: row.last_name,
-    employeeNumber: row.employee_number ?? null,
-    department: row.department ?? null,
-    role: row.role,
-    grade: (row as any).grade ?? null,
-    hireDate: row.hire_date ?? null,
-    jobTitle: (row as any).job_title ?? null,
-    employmentType: (row as any).employment_type ?? null,
-    phone: (row as any).phone ?? null,
-    personalEmail: (row as any).personal_email ?? null,
-    address: (row as any).address ?? null,
-    city: (row as any).city ?? null,
-    postalCode: (row as any).postal_code ?? null,
-    emergencyContactName: (row as any).emergency_contact_name ?? null,
-    emergencyContactPhone: (row as any).emergency_contact_phone ?? null,
-    emergencyContactRelationship: (row as any).emergency_contact_relationship ?? null,
-    managerId: (row as any).manager_id ?? null,
-    idNumber: (row as any).id_number ?? null,
-    dateOfBirth: (row as any).date_of_birth ?? null,
+  return (data as unknown as Record<string, unknown>[]).map(row => ({
+    id: row.id as string,
+    email: row.email as string,
+    firstName: row.first_name as string,
+    lastName: row.last_name as string,
+    employeeNumber: (row.employee_number as string | null) ?? null,
+    department: (row.department as string | null) ?? null,
+    role: row.role as UserRole,
+    grade: (row.grade as number | null) ?? null,
+    hireDate: (row.hire_date as string | null) ?? null,
+    jobTitle: (row.job_title as string | null) ?? null,
+    employmentType: (row.employment_type as Employee['employmentType']) ?? null,
+    phone: (row.phone as string | null) ?? null,
+    personalEmail: (row.personal_email as string | null) ?? null,
+    address: (row.address as string | null) ?? null,
+    city: (row.city as string | null) ?? null,
+    postalCode: (row.postal_code as string | null) ?? null,
+    emergencyContactName: (row.emergency_contact_name as string | null) ?? null,
+    emergencyContactPhone: (row.emergency_contact_phone as string | null) ?? null,
+    emergencyContactRelationship: (row.emergency_contact_relationship as string | null) ?? null,
+    managerId: (row.manager_id as string | null) ?? null,
+    idNumber: (row.id_number as string | null) ?? null,
+    dateOfBirth: (row.date_of_birth as string | null) ?? null,
+    isActive: (row.is_active as boolean) ?? true,
   }))
 }
 
@@ -564,7 +566,7 @@ export async function getAllLeaveBalances(year?: number): Promise<LeaveBalanceWi
         name,
         color
       ),
-      profiles!leave_balances_user_id_fkey (
+      employees!leave_balances_user_id_fkey (
         id,
         email,
         first_name,
@@ -572,7 +574,22 @@ export async function getAllLeaveBalances(year?: number): Promise<LeaveBalanceWi
         employee_number,
         department,
         role,
-        hire_date
+        grade,
+        job_title,
+        employment_type,
+        hire_date,
+        manager_id,
+        phone,
+        personal_email,
+        address,
+        city,
+        postal_code,
+        emergency_contact_name,
+        emergency_contact_phone,
+        emergency_contact_relationship,
+        id_number,
+        date_of_birth,
+        is_active
       )
     `)
     .eq('year', currentYear)
@@ -580,21 +597,22 @@ export async function getAllLeaveBalances(year?: number): Promise<LeaveBalanceWi
 
   if (error) return []
 
-  type BalanceWithProfile = LeaveBalanceRow & {
+  type BalanceWithEmployee = LeaveBalanceRow & {
     leave_types: { name: string; color: string | null }
-    profiles: {
-      id: string
-      email: string
-      first_name: string
-      last_name: string
-      employee_number: string | null
-      department: string | null
-      role: 'employee' | 'manager' | 'admin' | 'ceo'
-      hire_date: string | null
+    employees: {
+      id: string; email: string; first_name: string; last_name: string
+      employee_number: string | null; department: string | null; role: UserRole
+      grade: number | null; job_title: string | null
+      employment_type: 'permanent' | 'fixed_term' | 'probation' | null
+      hire_date: string | null; manager_id: string | null; phone: string | null
+      personal_email: string | null; address: string | null; city: string | null
+      postal_code: string | null; emergency_contact_name: string | null
+      emergency_contact_phone: string | null; emergency_contact_relationship: string | null
+      id_number: string | null; date_of_birth: string | null; is_active: boolean
     }
   }
 
-  return (data as BalanceWithProfile[]).map(row => ({
+  return (data as unknown as BalanceWithEmployee[]).map(row => ({
     id: row.id,
     userId: row.user_id,
     leaveTypeId: row.leave_type_id,
@@ -605,22 +623,35 @@ export async function getAllLeaveBalances(year?: number): Promise<LeaveBalanceWi
     year: row.year,
     color: row.leave_types?.color || null,
     employee: {
-      id: row.profiles.id,
-      email: row.profiles.email,
-      firstName: row.profiles.first_name,
-      lastName: row.profiles.last_name,
-      employeeNumber: row.profiles.employee_number,
-      department: row.profiles.department,
-      role: row.profiles.role,
-      hireDate: row.profiles.hire_date,
+      id: row.employees.id,
+      email: row.employees.email,
+      firstName: row.employees.first_name,
+      lastName: row.employees.last_name,
+      employeeNumber: row.employees.employee_number,
+      department: row.employees.department,
+      role: row.employees.role,
+      grade: row.employees.grade,
+      jobTitle: row.employees.job_title,
+      employmentType: row.employees.employment_type,
+      hireDate: row.employees.hire_date,
+      managerId: row.employees.manager_id,
+      phone: row.employees.phone,
+      personalEmail: row.employees.personal_email,
+      address: row.employees.address,
+      city: row.employees.city,
+      postalCode: row.employees.postal_code,
+      emergencyContactName: row.employees.emergency_contact_name,
+      emergencyContactPhone: row.employees.emergency_contact_phone,
+      emergencyContactRelationship: row.employees.emergency_contact_relationship,
+      idNumber: row.employees.id_number,
+      dateOfBirth: row.employees.date_of_birth,
+      isActive: row.employees.is_active,
     },
   }))
 }
 
 // Update a pending leave request (employee only)
 // Race condition protection: re-reads status immediately before saving.
-// If admin approved/rejected between the user opening the dialog and clicking Save,
-// the update is blocked and a clear message is returned.
 export async function updateLeaveRequest(
   requestId: string,
   updates: {
@@ -651,8 +682,6 @@ export async function updateLeaveRequest(
     }
   }
 
-  // Step 2: update — the .eq('status','pending') is a second safety net
-  // so even a millisecond-level race still can't overwrite a reviewed request
   const { error } = await supabase
     .from('leave_requests')
     .update({
@@ -723,7 +752,7 @@ export async function updateEmployee(
   const supabase = createClient()
 
   const { error } = await supabase
-    .from('profiles')
+    .from('employees')
     .update({
       first_name: data.firstName,
       last_name: data.lastName,
@@ -757,27 +786,17 @@ export async function updateEmployee(
   return { success: true }
 }
 
-// Delete an employee (admin only)
+// Delete an employee (admin only — hard delete; use deactivate for soft delete)
 export async function deleteEmployee(
   employeeId: string
 ): Promise<{ success: boolean; error?: string }> {
   const supabase = createClient()
 
-  // First delete leave balances
-  await supabase
-    .from('leave_balances')
-    .delete()
-    .eq('user_id', employeeId)
+  await supabase.from('leave_balances').delete().eq('user_id', employeeId)
+  await supabase.from('leave_requests').delete().eq('user_id', employeeId)
 
-  // Then delete leave requests
-  await supabase
-    .from('leave_requests')
-    .delete()
-    .eq('user_id', employeeId)
-
-  // Finally delete the profile
   const { error } = await supabase
-    .from('profiles')
+    .from('employees')
     .delete()
     .eq('id', employeeId)
 

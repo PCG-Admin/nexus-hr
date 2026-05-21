@@ -5,10 +5,11 @@ import { useRouter } from "next/navigation"
 import { useEffect, useState, useCallback } from "react"
 import { NavHeader } from "@/components/nav-header"
 import { ViewEmployeeProfileDialog } from "@/components/view-employee-profile-dialog"
+import { DisciplinaryRecordsDialog } from "@/components/disciplinary-records-dialog"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Users, Eye, Building2, GraduationCap, Mail } from "lucide-react"
+import { Users, Eye, Building2, GraduationCap, Mail, ShieldAlert } from "lucide-react"
 import { getAllEmployees, type Employee } from "@/lib/supabase/leave-service"
 import { DEMO_EMPLOYEES } from "@/lib/demo-data"
 
@@ -23,6 +24,7 @@ export default function TeamPage() {
   const [teamMembers, setTeamMembers] = useState<Employee[]>([])
   const [isLoadingData, setIsLoadingData] = useState(true)
   const [viewingEmployee, setViewingEmployee] = useState<Employee | null>(null)
+  const [disciplinaryEmployee, setDisciplinaryEmployee] = useState<Employee | null>(null)
 
   useEffect(() => {
     if (!isLoading && !user) router.push("/")
@@ -127,15 +129,26 @@ export default function TeamPage() {
                       </div>
                     </div>
 
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="w-full gap-1.5"
-                      onClick={() => setViewingEmployee(member)}
-                    >
-                      <Eye className="w-3.5 h-3.5" />
-                      View Profile
-                    </Button>
+                    <div className="flex gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="flex-1 gap-1.5"
+                        onClick={() => setViewingEmployee(member)}
+                      >
+                        <Eye className="w-3.5 h-3.5" />
+                        Profile
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="flex-1 gap-1.5 text-orange-600 border-orange-200 hover:bg-orange-50"
+                        onClick={() => setDisciplinaryEmployee(member)}
+                      >
+                        <ShieldAlert className="w-3.5 h-3.5" />
+                        Disciplinary
+                      </Button>
+                    </div>
                   </CardContent>
                 </Card>
               )
@@ -148,6 +161,12 @@ export default function TeamPage() {
         employee={viewingEmployee}
         isOpen={!!viewingEmployee}
         onClose={() => setViewingEmployee(null)}
+      />
+
+      <DisciplinaryRecordsDialog
+        employee={disciplinaryEmployee}
+        isOpen={!!disciplinaryEmployee}
+        onClose={() => setDisciplinaryEmployee(null)}
       />
     </div>
   )

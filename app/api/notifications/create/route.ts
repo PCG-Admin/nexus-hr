@@ -28,9 +28,9 @@ export async function POST(request: Request) {
     // Only employees (submitting their own leave) and admins/managers should reach this.
     // Verify the caller is actually authenticated — role check happens implicitly via
     // the leave submission flow, but we block unauthenticated callers above.
-    // Extra safety: confirm the caller exists in profiles.
+    // Extra safety: confirm the caller exists in employees.
     const { data: callerProfile } = await supabase
-      .from('profiles')
+      .from('employees' as any)
       .select('role')
       .eq('id', currentUser.id)
       .single()
@@ -60,10 +60,10 @@ export async function POST(request: Request) {
 
     const roles = Array.isArray(targetRoles) && targetRoles.length > 0
       ? targetRoles
-      : ['admin', 'manager']
+      : ['hr_manager', 'system_admin', 'line_manager']
 
     const { data: reviewers, error: profilesError } = await supabaseAdmin
-      .from('profiles')
+      .from('employees' as any)
       .select('id')
       .in('role', roles)
 

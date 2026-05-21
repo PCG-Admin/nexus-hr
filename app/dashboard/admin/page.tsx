@@ -9,6 +9,7 @@ import { EmployeeTable } from "@/components/employee-table"
 import { EditBalanceDialog } from "@/components/edit-balance-dialog"
 import { AddEmployeeDialog } from "@/components/add-employee-dialog"
 import { EditEmployeeDialog } from "@/components/edit-employee-dialog"
+import { DisciplinaryRecordsDialog } from "@/components/disciplinary-records-dialog"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Button } from "@/components/ui/button"
@@ -22,7 +23,7 @@ import {
   type LeaveRequestWithEmployee,
   type LeaveBalanceWithEmployee,
 } from "@/lib/supabase/leave-service"
-import { Users, CheckCircle2, Clock, TrendingUp, Edit, Search, ChevronDown, ChevronRight, UserIcon, UserPlus, Trash2, CalendarDays, Plus } from "lucide-react"
+import { Users, CheckCircle2, Clock, TrendingUp, Edit, Search, ChevronDown, ChevronRight, UserIcon, UserPlus, Trash2, CalendarDays, Plus, Building2, GraduationCap, X, Settings2 } from "lucide-react"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { format } from "date-fns"
 import { Badge } from "@/components/ui/badge"
@@ -33,6 +34,7 @@ import {
   type PublicHoliday,
 } from "@/lib/supabase/holiday-service"
 import { DEMO_EMPLOYEES } from "@/lib/demo-data"
+import { getOrgConfig, saveOrgConfig, type OrgConfig } from "@/lib/org-config"
 
 export default function AdminDashboardPage() {
   const { user, isLoading } = useAuth()
@@ -50,6 +52,11 @@ export default function AdminDashboardPage() {
   const [editingEmployee, setEditingEmployee] = useState<Employee | null>(null)
   const [deletingEmployee, setDeletingEmployee] = useState<Employee | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
+  const [disciplinaryEmployee, setDisciplinaryEmployee] = useState<Employee | null>(null)
+
+  const [orgConfig, setOrgConfig] = useState<OrgConfig>({ departments: [], grades: [] })
+  const [newDeptName, setNewDeptName] = useState("")
+  const [newGradeValue, setNewGradeValue] = useState("")
 
   const [publicHolidays, setPublicHolidays] = useState<PublicHoliday[]>([])
   const [holidayYear, setHolidayYear] = useState(new Date().getFullYear())
@@ -141,6 +148,7 @@ export default function AdminDashboardPage() {
     if (user && ["hr_manager", "system_admin"].includes(user.role)) {
       fetchData()
       fetchHolidays()
+      setOrgConfig(getOrgConfig())
     }
   }, [user, fetchData, fetchHolidays])
 
@@ -150,8 +158,49 @@ export default function AdminDashboardPage() {
     }
   }, [holidayYear, user, fetchHolidays])
 
+  const handleAddDepartment = () => {
+    const name = newDeptName.trim()
+    if (!name || orgConfig.departments.map(d => d.toLowerCase()).includes(name.toLowerCase())) return
+    const updated: OrgConfig = { ...orgConfig, departments: [...orgConfig.departments, name].sort() }
+    setOrgConfig(updated)
+    saveOrgConfig(updated)
+    setNewDeptName("")
+  }
+
+  const handleRemoveDepartment = (dept: string) => {
+    const updated: OrgConfig = { ...orgConfig, departments: orgConfig.departments.filter(d => d !== dept) }
+    setOrgConfig(updated)
+    saveOrgConfig(updated)
+  }
+
+  const handleAddGrade = () => {
+    const val = parseInt(newGradeValue)
+    if (isNaN(val) || val < 1 || val > 99 || orgConfig.grades.includes(val)) return
+    const updated: OrgConfig = { ...orgConfig, grades: [...orgConfig.grades, val].sort((a, b) => a - b) }
+    setOrgConfig(updated)
+    saveOrgConfig(updated)
+    setNewGradeValue("")
+  }
+
+  const handleRemoveGrade = (grade: number) => {
+    const updated: OrgConfig = { ...orgConfig, grades: orgConfig.grades.filter(g => g !== grade) }
+    setOrgConfig(updated)
+    saveOrgConfig(updated)
+  }
+
   const handleEditEmployee = (employee: Employee) => {
     setEditingEmployee(employee)
+  }
+
+  const handleDisableEmployee = (employee: Employee, reactivate: boolean) => {
+    const dbReady = !!(process.env.NEXT_PUBLIC_SUPABASE_URL && !process.env.NEXT_PUBLIC_SUPABASE_URL.includes('placeholder'))
+    if (dbReady) {
+      // TODO: call /api/admin/toggle-employee-active when DB is connected
+    }
+    // Toggle isActive in local state (persists until page refresh in demo mode)
+    setEmployees(prev =>
+      prev.map(e => e.id === employee.id ? { ...e, isActive: reactivate ? true : false } : e)
+    )
   }
 
   const handleDeleteEmployee = async () => {
@@ -303,6 +352,10 @@ export default function AdminDashboardPage() {
                 <TabsTrigger value="balances">Leave Balances</TabsTrigger>
                 <TabsTrigger value="requests">All Requests ({allRequests.length})</TabsTrigger>
                 <TabsTrigger value="holidays">Public Holidays</TabsTrigger>
+                <TabsTrigger value="organisation">
+                  <Settings2 className="w-3.5 h-3.5 mr-1.5" />
+                  Organisation
+                </TabsTrigger>
                 <TabsTrigger value="compliance">BCEA Compliance</TabsTrigger>
               </TabsList>
 
@@ -321,6 +374,8 @@ export default function AdminDashboardPage() {
                       employees={filteredEmployees}
                       onEditEmployee={handleEditEmployee}
                       onDeleteEmployee={(employee) => setDeletingEmployee(employee)}
+                      onDisciplinaryClick={(employee) => setDisciplinaryEmployee(employee)}
+                      onDisableEmployee={handleDisableEmployee}
                     />
                   </CardContent>
                 </Card>
@@ -576,6 +631,135 @@ export default function AdminDashboardPage() {
                 </Card>
               </TabsContent>
 
+              {/* Organisation Tab */}
+              <TabsContent value="organisation" className="space-y-6">
+                <div className="flex items-start gap-3 px-4 py-3 rounded-lg bg-blue-50 border border-blue-200 text-sm text-blue-800">
+                  <Settings2 className="w-4 h-4 shrink-0 mt-0.5" />
+                  <span>
+                    Changes apply immediately to all Add/Edit Employee forms. Currently stored locally —
+                    once the database is connected, this configuration will persist for all users automatically.
+                  </span>
+                </div>
+
+                <div className="grid gap-6 md:grid-cols-2">
+                  {/* ── Departments ── */}
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2 text-base">
+                        <Building2 className="w-4 h-4" />
+                        Departments
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      {/* Add new */}
+                      <div className="flex gap-2">
+                        <Input
+                          placeholder="New department name"
+                          value={newDeptName}
+                          onChange={e => setNewDeptName(e.target.value)}
+                          onKeyDown={e => e.key === "Enter" && handleAddDepartment()}
+                          className="flex-1"
+                        />
+                        <Button
+                          size="sm"
+                          onClick={handleAddDepartment}
+                          disabled={!newDeptName.trim()}
+                        >
+                          <Plus className="w-4 h-4 mr-1" />
+                          Add
+                        </Button>
+                      </div>
+
+                      {/* List */}
+                      <div className="space-y-1.5 max-h-64 overflow-y-auto">
+                        {orgConfig.departments.map(dept => (
+                          <div
+                            key={dept}
+                            className="flex items-center justify-between px-3 py-2 rounded-md border bg-muted/30 text-sm"
+                          >
+                            <div className="flex items-center gap-2">
+                              <Building2 className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                              <span>{dept}</span>
+                            </div>
+                            <button
+                              onClick={() => handleRemoveDepartment(dept)}
+                              className="text-muted-foreground hover:text-red-500 transition-colors p-0.5 rounded"
+                              title="Remove department"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        ))}
+                        {orgConfig.departments.length === 0 && (
+                          <p className="text-sm text-muted-foreground text-center py-4">No departments configured</p>
+                        )}
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        {orgConfig.departments.length} department{orgConfig.departments.length !== 1 ? "s" : ""}
+                      </p>
+                    </CardContent>
+                  </Card>
+
+                  {/* ── Grades ── */}
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2 text-base">
+                        <GraduationCap className="w-4 h-4" />
+                        Employee Grades
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      {/* Add new */}
+                      <div className="flex gap-2">
+                        <Input
+                          type="number"
+                          min={1}
+                          max={99}
+                          placeholder="Grade number (e.g. 7)"
+                          value={newGradeValue}
+                          onChange={e => setNewGradeValue(e.target.value)}
+                          onKeyDown={e => e.key === "Enter" && handleAddGrade()}
+                          className="flex-1"
+                        />
+                        <Button
+                          size="sm"
+                          onClick={handleAddGrade}
+                          disabled={!newGradeValue.trim()}
+                        >
+                          <Plus className="w-4 h-4 mr-1" />
+                          Add
+                        </Button>
+                      </div>
+
+                      {/* List */}
+                      <div className="grid grid-cols-3 gap-2">
+                        {orgConfig.grades.map(grade => (
+                          <div
+                            key={grade}
+                            className="flex items-center justify-between px-3 py-2 rounded-md border bg-muted/30 text-sm"
+                          >
+                            <span className="font-medium">Grade {grade}</span>
+                            <button
+                              onClick={() => handleRemoveGrade(grade)}
+                              className="text-muted-foreground hover:text-red-500 transition-colors p-0.5 rounded ml-2"
+                              title="Remove grade"
+                            >
+                              <X className="w-3 h-3" />
+                            </button>
+                          </div>
+                        ))}
+                        {orgConfig.grades.length === 0 && (
+                          <p className="text-sm text-muted-foreground text-center py-4 col-span-3">No grades configured</p>
+                        )}
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        {orgConfig.grades.length} grade level{orgConfig.grades.length !== 1 ? "s" : ""}
+                      </p>
+                    </CardContent>
+                  </Card>
+                </div>
+              </TabsContent>
+
               {/* Compliance Tab */}
               <TabsContent value="compliance">
                 <div className="space-y-4">
@@ -698,6 +882,12 @@ export default function AdminDashboardPage() {
         isOpen={!!editingEmployee}
         onClose={() => setEditingEmployee(null)}
         onSuccess={fetchData}
+      />
+
+      <DisciplinaryRecordsDialog
+        employee={disciplinaryEmployee}
+        isOpen={!!disciplinaryEmployee}
+        onClose={() => setDisciplinaryEmployee(null)}
       />
 
       {/* Delete Confirmation Dialog */}

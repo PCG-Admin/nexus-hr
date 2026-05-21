@@ -25,11 +25,11 @@ import {
 } from "@/lib/supabase/leave-service"
 
 const DEMO_TYPES: LeaveType[] = [
-  { id: "demo-annual",    name: "Annual Leave",            description: null, defaultDaysPerYear: 15,  accrualType: "annual", requiresDocumentation: false, color: null },
-  { id: "demo-sick",      name: "Sick Leave",              description: null, defaultDaysPerYear: 10,  accrualType: "annual", requiresDocumentation: true,  color: null },
-  { id: "demo-family",    name: "Family Responsibility",   description: null, defaultDaysPerYear: 3,   accrualType: "annual", requiresDocumentation: false, color: null },
-  { id: "demo-maternity", name: "Maternity Leave",         description: null, defaultDaysPerYear: 120, accrualType: "fixed",  requiresDocumentation: true,  color: null },
-  { id: "demo-parental",  name: "Parental Leave",          description: null, defaultDaysPerYear: 10,  accrualType: "fixed",  requiresDocumentation: false, color: null },
+  { id: "demo-annual",    name: "Annual Leave",            defaultDays: 15,  requiresDocumentation: false, color: null },
+  { id: "demo-sick",      name: "Sick Leave",              defaultDays: 10,  requiresDocumentation: true,  color: null },
+  { id: "demo-family",    name: "Family Responsibility",   defaultDays: 3,   requiresDocumentation: false, color: null },
+  { id: "demo-maternity", name: "Maternity Leave",         defaultDays: 120, requiresDocumentation: true,  color: null },
+  { id: "demo-parental",  name: "Parental Leave",          defaultDays: 10,  requiresDocumentation: false, color: null },
 ]
 
 const DEMO_BALANCES: LeaveBalance[] = [

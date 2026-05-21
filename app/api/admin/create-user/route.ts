@@ -31,12 +31,12 @@ export async function POST(request: Request) {
 
     // Check if current user is an admin
     const { data: profile } = await supabase
-      .from('profiles')
+      .from('employees' as any)
       .select('role')
       .eq('id', currentUser.id)
       .single()
 
-    if (!profile || (profile.role !== 'admin' && profile.role !== 'ceo')) {
+    if (!profile || !['hr_manager', 'system_admin'].includes((profile as any).role)) {
       return NextResponse.json({ error: 'Forbidden - Admin access required' }, { status: 403 })
     }
 
@@ -63,10 +63,11 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: authError.message }, { status: 400 })
     }
 
-    // Update profile (trigger auto-creates it, so we update with full details)
+    // Insert the employee record (directly — no DB trigger)
     const { error: profileError } = await supabaseAdmin
-      .from('profiles')
-      .update({
+      .from('employees' as any)
+      .insert({
+        id: authData.user.id,
         email,
         first_name: firstName,
         last_name: lastName,
@@ -74,12 +75,11 @@ export async function POST(request: Request) {
         department: department || null,
         employee_number: employeeNumber || null,
         hire_date: new Date().toISOString().split('T')[0],
+        is_active: true,
       })
-      .eq('id', authData.user.id)
 
     if (profileError) {
-      console.error('Error updating profile:', profileError)
-      // Try to delete the auth user if profile update failed
+      console.error('Error creating employee record:', profileError)
       await supabaseAdmin.auth.admin.deleteUser(authData.user.id)
       return NextResponse.json({ error: profileError.message }, { status: 400 })
     }
@@ -87,27 +87,18 @@ export async function POST(request: Request) {
     // Create leave balances for the new user
     const { data: leaveTypes } = await supabaseAdmin
       .from('leave_types')
-      .select('id, name, default_days_per_year, accrual_type')
+      .select('id, default_days')
 
     if (leaveTypes && leaveTypes.length > 0) {
       const currentYear = new Date().getFullYear()
-      const now = new Date()
 
-      const isEmployee = role === 'employee'
-
-      const balances = leaveTypes.map((lt) => {
-        // Employees accrue monthly — start at 0, cron adds 1.25 from next month.
-        // Admins/managers get the full fixed allocation immediately (no accrual).
-        const useAccrual = isEmployee && lt.accrual_type === 'monthly'
-        return {
-          user_id: authData.user.id,
-          leave_type_id: lt.id,
-          total_days: useAccrual ? 0 : lt.default_days_per_year,
-          used_days: 0,
-          year: currentYear,
-          last_accrued_at: useAccrual ? now.toISOString() : null,
-        }
-      })
+      const balances = (leaveTypes as { id: string; default_days: number }[]).map((lt) => ({
+        user_id: authData.user.id,
+        leave_type_id: lt.id,
+        total_days: lt.default_days,
+        used_days: 0,
+        year: currentYear,
+      }))
 
       await supabaseAdmin.from('leave_balances').insert(balances)
     }

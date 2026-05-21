@@ -1,37 +1,33 @@
-import { type NextRequest, NextResponse } from 'next/server'
+import { type NextRequest, NextResponse } from "next/server"
+import { updateSession } from "@/lib/supabase/middleware"
 
-const publicRoutes = ['/']
-
-// More specific routes must be listed first — middleware matches the longest prefix
+// More specific routes must come first — middleware matches the longest prefix
 const roleRoutes: Record<string, string[]> = {
-  '/dashboard/admin/reports': ['system_admin', 'hr_manager', 'executive'],
-  '/dashboard/admin':         ['system_admin', 'hr_manager'],
-  '/dashboard/approvals':     ['line_manager', 'hr_manager', 'system_admin'],
-  '/dashboard/team':          ['line_manager'],
+  "/dashboard/admin/reports": ["system_admin", "hr_manager", "executive"],
+  "/dashboard/admin":         ["system_admin", "hr_manager"],
+  "/dashboard/approvals":     ["line_manager", "hr_manager", "system_admin"],
+  "/dashboard/team":          ["line_manager"],
 }
 
 export async function middleware(request: NextRequest) {
+  const { user, supabaseResponse } = await updateSession(request)
   const pathname = request.nextUrl.pathname
-  const sessionCookie = request.cookies.get('demo-session')
 
-  if (publicRoutes.includes(pathname)) {
-    if (sessionCookie) {
-      return NextResponse.redirect(new URL('/dashboard', request.url))
-    }
-    return NextResponse.next()
+  // Root — redirect authenticated users straight to dashboard
+  if (pathname === "/") {
+    if (user) return NextResponse.redirect(new URL("/dashboard", request.url))
+    return supabaseResponse
   }
 
-  if (pathname.startsWith('/dashboard')) {
-    if (!sessionCookie) {
-      return NextResponse.redirect(new URL('/', request.url))
-    }
+  // All dashboard routes require a valid Supabase session
+  if (pathname.startsWith("/dashboard")) {
+    if (!user) return NextResponse.redirect(new URL("/", request.url))
 
-    try {
-      const data = JSON.parse(decodeURIComponent(sessionCookie.value))
-      const role = data.role
+    // Role cookie is set by auth.tsx on login — used for RBAC without a DB call
+    const role = request.cookies.get("nexus-role")?.value
 
-      // Find the most specific (longest) matching route prefix
-      let matchedRoute = ''
+    if (role) {
+      let matchedRoute = ""
       let matchedRoles: string[] = []
       for (const [route, allowedRoles] of Object.entries(roleRoutes)) {
         if (pathname.startsWith(route) && route.length > matchedRoute.length) {
@@ -40,18 +36,16 @@ export async function middleware(request: NextRequest) {
         }
       }
       if (matchedRoute && !matchedRoles.includes(role)) {
-        return NextResponse.redirect(new URL('/dashboard', request.url))
+        return NextResponse.redirect(new URL("/dashboard", request.url))
       }
-    } catch {
-      return NextResponse.redirect(new URL('/', request.url))
     }
   }
 
-  return NextResponse.next()
+  return supabaseResponse
 }
 
 export const config = {
   matcher: [
-    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
+    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
   ],
 }

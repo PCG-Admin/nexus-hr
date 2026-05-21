@@ -4,15 +4,23 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import type { Employee } from "@/lib/supabase/leave-service"
-import { Pencil, Trash2 } from "lucide-react"
+import { Pencil, Trash2, ShieldAlert, UserX, UserCheck } from "lucide-react"
 
 type EmployeeTableProps = {
   employees: Employee[]
   onEditEmployee: (employee: Employee) => void
   onDeleteEmployee: (employee: Employee) => void
+  onDisciplinaryClick?: (employee: Employee) => void
+  onDisableEmployee?: (employee: Employee, setActive: boolean) => void
 }
 
-export function EmployeeTable({ employees, onEditEmployee, onDeleteEmployee }: EmployeeTableProps) {
+export function EmployeeTable({
+  employees,
+  onEditEmployee,
+  onDeleteEmployee,
+  onDisciplinaryClick,
+  onDisableEmployee,
+}: EmployeeTableProps) {
   const ROLE_LABELS: Record<string, string> = {
     employee:     "Employee",
     line_manager: "Line Manager",
@@ -32,6 +40,9 @@ export function EmployeeTable({ employees, onEditEmployee, onDeleteEmployee }: E
     }
   }
 
+  // isActive === undefined means active (not yet toggled)
+  const isDisabled = (e: Employee) => e.isActive === false
+
   return (
     <div className="border rounded-lg">
       <Table>
@@ -42,12 +53,16 @@ export function EmployeeTable({ employees, onEditEmployee, onDeleteEmployee }: E
             <TableHead>Department</TableHead>
             <TableHead>Role</TableHead>
             <TableHead>Hire Date</TableHead>
+            <TableHead>Status</TableHead>
             <TableHead className="text-right">Actions</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
           {employees.map((employee) => (
-            <TableRow key={employee.id}>
+            <TableRow
+              key={employee.id}
+              className={isDisabled(employee) ? "opacity-50" : ""}
+            >
               <TableCell>
                 <div>
                   <p className="font-medium">
@@ -68,12 +83,58 @@ export function EmployeeTable({ employees, onEditEmployee, onDeleteEmployee }: E
               <TableCell>
                 {employee.hireDate ? new Date(employee.hireDate).toLocaleDateString() : "N/A"}
               </TableCell>
+              <TableCell>
+                {isDisabled(employee) ? (
+                  <Badge className="bg-slate-100 text-slate-500 border-slate-300" variant="outline">
+                    Inactive
+                  </Badge>
+                ) : (
+                  <Badge className="bg-emerald-100 text-emerald-800 border-emerald-300" variant="outline">
+                    Active
+                  </Badge>
+                )}
+              </TableCell>
               <TableCell className="text-right">
-                <div className="flex justify-end gap-2">
-                  <Button variant="ghost" size="sm" onClick={() => onEditEmployee(employee)}>
+                <div className="flex justify-end gap-2 flex-wrap">
+                  {onDisciplinaryClick && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="text-orange-600 hover:text-orange-700 hover:bg-orange-50"
+                      onClick={() => onDisciplinaryClick(employee)}
+                    >
+                      <ShieldAlert className="w-4 h-4 mr-2" />
+                      Disciplinary
+                    </Button>
+                  )}
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => onEditEmployee(employee)}
+                    disabled={isDisabled(employee)}
+                  >
                     <Pencil className="w-4 h-4 mr-2" />
                     Edit
                   </Button>
+                  {onDisableEmployee && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className={
+                        isDisabled(employee)
+                          ? "text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50"
+                          : "text-slate-600 hover:text-slate-700 hover:bg-slate-100"
+                      }
+                      onClick={() => onDisableEmployee(employee, isDisabled(employee))}
+                      title={isDisabled(employee) ? "Re-enable this employee account" : "Deactivate this employee account without deleting"}
+                    >
+                      {isDisabled(employee) ? (
+                        <><UserCheck className="w-4 h-4 mr-2" />Enable</>
+                      ) : (
+                        <><UserX className="w-4 h-4 mr-2" />Disable</>
+                      )}
+                    </Button>
+                  )}
                   <Button
                     variant="ghost"
                     size="sm"

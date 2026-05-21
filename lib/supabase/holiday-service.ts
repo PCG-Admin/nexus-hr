@@ -46,10 +46,11 @@ export async function addPublicHoliday(
   date: string
 ): Promise<{ success: boolean; error?: string }> {
   const supabase = createClient()
+  const year = new Date(date).getFullYear()
 
   const { error } = await supabase
     .from('public_holidays')
-    .insert({ name, date })
+    .insert({ name, date, year })
 
   if (error) return { success: false, error: error.message }
   return { success: true }
