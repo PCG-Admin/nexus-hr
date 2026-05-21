@@ -16,8 +16,9 @@ import {
   type LeaveRequestWithEmployee,
 } from "@/lib/supabase/leave-service"
 import { AdminEditLeaveDialog } from "@/components/admin-edit-leave-dialog"
-import { CheckCircle2, FileText, ExternalLink, Pencil } from "lucide-react"
+import { CheckCircle2, FileText, ExternalLink, Pencil, CalendarDays } from "lucide-react"
 import { format } from "date-fns"
+import { DEMO_LEAVE_REQUESTS } from "@/lib/demo-data"
 
 export default function ApprovalsPage() {
   const { user, isLoading } = useAuth()
@@ -29,44 +30,54 @@ export default function ApprovalsPage() {
   const [editingRequest, setEditingRequest] = useState<LeaveRequestWithEmployee | null>(null)
 
   const fetchRequests = useCallback(async () => {
+    if (!user) return
     setIsLoadingRequests(true)
     const dbReady = !!(process.env.NEXT_PUBLIC_SUPABASE_URL && !process.env.NEXT_PUBLIC_SUPABASE_URL.includes('placeholder'))
     if (!dbReady) {
-      setAllRequests([])
+      // Line managers only see requests from their own team
+      const requests = user.role === "line_manager"
+        ? DEMO_LEAVE_REQUESTS.filter(r => r.employee.managerId === user.id)
+        : DEMO_LEAVE_REQUESTS
+      setAllRequests(requests)
       setIsLoadingRequests(false)
       return
     }
     const requests = await getAllLeaveRequests()
     setAllRequests(requests)
     setIsLoadingRequests(false)
-  }, [])
+  }, [user])
 
   useEffect(() => {
     if (!isLoading && !user) {
       router.push("/")
     }
 
-    // Redirect if not a manager, admin, or ceo
-    if (!isLoading && user && user.role !== "manager" && user.role !== "admin" && user.role !== "ceo") {
+    if (!isLoading && user && !["line_manager", "hr_manager", "system_admin"].includes(user.role)) {
       router.push("/dashboard")
     }
   }, [user, isLoading, router])
 
   useEffect(() => {
-    if (user && (user.role === "manager" || user.role === "admin" || user.role === "ceo")) {
+    if (user && ["line_manager", "hr_manager", "system_admin"].includes(user.role)) {
       fetchRequests()
     }
   }, [user, fetchRequests])
 
-  const isCeo = user?.role === "ceo"
+  // hr_manager and system_admin are final approvers; line_manager does stage-1
+  const isFinalApprover = user?.role === "hr_manager" || user?.role === "system_admin"
 
-  // Managers/admins act on "pending"; CEO acts on "pending_ceo"
-  const actionablePending = isCeo
+  // Line managers act on "pending"; final approvers act on "pending_ceo" (pending final approval)
+  const actionablePending = isFinalApprover
     ? allRequests.filter((r) => r.status === "pending_ceo")
     : allRequests.filter((r) => r.status === "pending")
   const awaitingCeoRequests = allRequests.filter((r) => r.status === "pending_ceo")
   const approvedRequests = allRequests.filter((r) => r.status === "approved")
   const rejectedRequests = allRequests.filter((r) => r.status === "rejected")
+
+  const today = new Date().toISOString().split("T")[0]
+  const upcomingApproved = approvedRequests
+    .filter((r) => r.endDate >= today)
+    .sort((a, b) => a.startDate.localeCompare(b.startDate))
 
   const handleApprove = async (requestId: string, notes: string) => {
     if (!user) return
@@ -74,7 +85,7 @@ export default function ApprovalsPage() {
     setProcessingId(requestId)
 
     let result
-    if (isCeo) {
+    if (isFinalApprover) {
       // CEO final approval
       result = await approveLeaveRequest(requestId, user.id, notes)
       if (result.success) {
@@ -146,16 +157,16 @@ export default function ApprovalsPage() {
           <Tabs defaultValue="pending" className="space-y-6">
             <TabsList>
               <TabsTrigger value="pending" className="relative">
-                {isCeo ? "Pending My Approval" : "Pending"}
+                {isFinalApprover ? "Pending My Approval" : "Pending"}
                 {actionablePending.length > 0 && (
                   <Badge className="ml-2 h-5 w-5 rounded-full p-0 flex items-center justify-center bg-amber-600">
                     {actionablePending.length}
                   </Badge>
                 )}
               </TabsTrigger>
-              {!isCeo && (
+              {!isFinalApprover && (
                 <TabsTrigger value="awaiting_ceo" className="relative">
-                  Awaiting CEO
+                  Awaiting Final Approval
                   {awaitingCeoRequests.length > 0 && (
                     <Badge className="ml-2 h-5 w-5 rounded-full p-0 flex items-center justify-center bg-blue-600">
                       {awaitingCeoRequests.length}
@@ -165,6 +176,15 @@ export default function ApprovalsPage() {
               )}
               <TabsTrigger value="approved">Approved ({approvedRequests.length})</TabsTrigger>
               <TabsTrigger value="rejected">Rejected ({rejectedRequests.length})</TabsTrigger>
+              <TabsTrigger value="calendar">
+                <CalendarDays className="w-3.5 h-3.5 mr-1.5" />
+                Team Calendar
+                {upcomingApproved.length > 0 && (
+                  <Badge className="ml-2 h-5 w-5 rounded-full p-0 flex items-center justify-center bg-emerald-600">
+                    {upcomingApproved.length}
+                  </Badge>
+                )}
+              </TabsTrigger>
             </TabsList>
 
             {/* Actionable pending requests */}
@@ -192,12 +212,12 @@ export default function ApprovalsPage() {
             </TabsContent>
 
             {/* Awaiting CEO tab — managers only, read-only */}
-            {!isCeo && (
+            {!isFinalApprover && (
               <TabsContent value="awaiting_ceo" className="space-y-4">
                 {awaitingCeoRequests.length === 0 ? (
                   <Card>
                     <CardContent className="py-12 text-center text-muted-foreground">
-                      No requests awaiting CEO approval
+                      No requests awaiting final approval
                     </CardContent>
                   </Card>
                 ) : (
@@ -211,7 +231,7 @@ export default function ApprovalsPage() {
                                 {request.employee.firstName} {request.employee.lastName}
                               </h4>
                               <Badge className="bg-blue-100 text-blue-800 border-blue-300" variant="outline">
-                                Awaiting CEO
+                                Awaiting Final Approval
                               </Badge>
                             </div>
                             <p className="text-sm">
@@ -335,6 +355,56 @@ export default function ApprovalsPage() {
                       </CardContent>
                     </Card>
                   ))}
+                </div>
+              )}
+            </TabsContent>
+            {/* Team Calendar — upcoming approved leave */}
+            <TabsContent value="calendar" className="space-y-4">
+              <p className="text-sm text-muted-foreground">Approved leave scheduled from today onwards</p>
+              {upcomingApproved.length === 0 ? (
+                <Card>
+                  <CardContent className="py-12 text-center text-muted-foreground">
+                    No upcoming approved leave on record
+                  </CardContent>
+                </Card>
+              ) : (
+                <div className="space-y-2">
+                  {upcomingApproved.map((req) => {
+                    const initials = `${req.employee.firstName[0]}${req.employee.lastName[0]}`.toUpperCase()
+                    const isActive = req.startDate <= today && req.endDate >= today
+                    return (
+                      <Card key={req.id}>
+                        <CardContent className="py-3 px-4">
+                          <div className="flex items-center justify-between gap-4">
+                            <div className="flex items-center gap-3">
+                              <div className="w-9 h-9 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
+                                <span className="text-xs font-bold text-primary">{initials}</span>
+                              </div>
+                              <div>
+                                <p className="text-sm font-medium leading-tight">
+                                  {req.employee.firstName} {req.employee.lastName}
+                                </p>
+                                <p className="text-xs text-muted-foreground">{req.leaveTypeName}</p>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-3">
+                              {isActive && (
+                                <Badge className="bg-emerald-100 text-emerald-800 border-emerald-300 text-xs" variant="outline">
+                                  On Leave Now
+                                </Badge>
+                              )}
+                              <div className="text-right text-sm">
+                                <p className="font-medium">
+                                  {format(new Date(req.startDate), "MMM dd")} – {format(new Date(req.endDate), "MMM dd, yyyy")}
+                                </p>
+                                <p className="text-xs text-muted-foreground">{req.daysRequested} days</p>
+                              </div>
+                            </div>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    )
+                  })}
                 </div>
               )}
             </TabsContent>

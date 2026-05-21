@@ -3,9 +3,17 @@
 import { useAuth } from "@/lib/auth"
 import { Button } from "@/components/ui/button"
 import { useRouter, usePathname } from "next/navigation"
-import { LogOut, Calendar, Users, Shield, BarChart3 } from "lucide-react"
+import { LogOut, Calendar, Users, Shield, BarChart3, UserCircle, UsersRound } from "lucide-react"
 import Image from "next/image"
 import { NotificationBell } from "@/components/notification-bell"
+
+const ROLE_LABELS: Record<string, string> = {
+  employee:     "Employee",
+  line_manager: "Line Manager",
+  hr_manager:   "HR Manager",
+  executive:    "Executive",
+  system_admin: "System Admin",
+}
 
 export function NavHeader() {
   const { user, logout } = useAuth()
@@ -17,11 +25,14 @@ export function NavHeader() {
     router.push("/")
   }
 
-  const isManager = user?.role === "manager" || user?.role === "admin" || user?.role === "ceo"
-  const isAdmin = user?.role === "admin" || user?.role === "ceo"
+  const isManager    = ["line_manager", "hr_manager", "system_admin"].includes(user?.role ?? "")
+  const isAdmin      = ["hr_manager", "system_admin"].includes(user?.role ?? "")
+  const isExecutive  = user?.role === "executive"
+  const isLineManager = user?.role === "line_manager"
   const isOnApprovals = pathname?.includes("/approvals")
-  const isOnAdmin = pathname?.includes("/admin") && !pathname?.includes("/admin/reports")
-  const isOnReports = pathname?.includes("/admin/reports")
+  const isOnTeam      = pathname?.includes("/team")
+  const isOnAdmin     = pathname?.includes("/admin") && !pathname?.includes("/admin/reports")
+  const isOnReports   = pathname?.includes("/admin/reports")
 
   return (
     <header className="border-b bg-card">
@@ -43,12 +54,22 @@ export function NavHeader() {
 
           <div className="flex items-center gap-4">
             {isManager && <NotificationBell />}
-            <div className="text-right">
-              <p className="text-sm font-medium">
-                {user?.firstName} {user?.lastName}
-              </p>
-              <p className="text-xs text-muted-foreground capitalize">{user?.role}</p>
-            </div>
+            <button
+              onClick={() => router.push("/dashboard/profile")}
+              className="text-right hover:opacity-75 transition-opacity cursor-pointer"
+            >
+              <p className="text-sm font-medium">{user?.firstName} {user?.lastName}</p>
+              <p className="text-xs text-muted-foreground">{ROLE_LABELS[user?.role ?? ""] ?? user?.role}</p>
+            </button>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => router.push("/dashboard/profile")}
+              title="My Profile"
+              className="text-muted-foreground hover:text-foreground"
+            >
+              <UserCircle className="w-5 h-5" />
+            </Button>
             <Button variant="outline" size="sm" onClick={handleLogout}>
               <LogOut className="w-4 h-4 mr-2" />
               Logout
@@ -56,10 +77,9 @@ export function NavHeader() {
           </div>
         </div>
 
-        {(isManager || isAdmin) && (
-          <div className="mt-4 flex gap-2">
+        <div className="mt-4 flex gap-2">
             <Button
-              variant={!isOnApprovals && !isOnAdmin && !isOnReports ? "default" : "ghost"}
+              variant={!isOnApprovals && !isOnTeam && !isOnAdmin && !isOnReports && !pathname?.includes("/profile") ? "default" : "ghost"}
               size="sm"
               onClick={() => router.push("/dashboard")}
             >
@@ -67,35 +87,54 @@ export function NavHeader() {
               My Leave
             </Button>
             <Button
-              variant={isOnApprovals ? "default" : "ghost"}
+              variant={pathname?.includes("/profile") ? "default" : "ghost"}
               size="sm"
-              onClick={() => router.push("/dashboard/approvals")}
+              onClick={() => router.push("/dashboard/profile")}
             >
-              <Users className="w-4 h-4 mr-2" />
-              Team Approvals
+              <UserCircle className="w-4 h-4 mr-2" />
+              My Profile
             </Button>
+            {isLineManager && (
+              <Button
+                variant={isOnTeam ? "default" : "ghost"}
+                size="sm"
+                onClick={() => router.push("/dashboard/team")}
+              >
+                <UsersRound className="w-4 h-4 mr-2" />
+                My Team
+              </Button>
+            )}
+            {isManager && (
+              <Button
+                variant={isOnApprovals ? "default" : "ghost"}
+                size="sm"
+                onClick={() => router.push("/dashboard/approvals")}
+              >
+                <Users className="w-4 h-4 mr-2" />
+                Team Approvals
+              </Button>
+            )}
             {isAdmin && (
-              <>
-                <Button
-                  variant={isOnAdmin ? "default" : "ghost"}
-                  size="sm"
-                  onClick={() => router.push("/dashboard/admin")}
-                >
-                  <Shield className="w-4 h-4 mr-2" />
-                  Admin
-                </Button>
-                <Button
-                  variant={isOnReports ? "default" : "ghost"}
-                  size="sm"
-                  onClick={() => router.push("/dashboard/admin/reports")}
-                >
-                  <BarChart3 className="w-4 h-4 mr-2" />
-                  Reports
-                </Button>
-              </>
+              <Button
+                variant={isOnAdmin ? "default" : "ghost"}
+                size="sm"
+                onClick={() => router.push("/dashboard/admin")}
+              >
+                <Shield className="w-4 h-4 mr-2" />
+                Admin
+              </Button>
+            )}
+            {(isAdmin || isExecutive) && (
+              <Button
+                variant={isOnReports ? "default" : "ghost"}
+                size="sm"
+                onClick={() => router.push("/dashboard/admin/reports")}
+              >
+                <BarChart3 className="w-4 h-4 mr-2" />
+                Reports
+              </Button>
             )}
           </div>
-        )}
       </div>
     </header>
   )

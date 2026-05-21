@@ -13,16 +13,22 @@ type EmployeeTableProps = {
 }
 
 export function EmployeeTable({ employees, onEditEmployee, onDeleteEmployee }: EmployeeTableProps) {
+  const ROLE_LABELS: Record<string, string> = {
+    employee:     "Employee",
+    line_manager: "Line Manager",
+    hr_manager:   "HR Manager",
+    executive:    "Executive",
+    system_admin: "System Admin",
+  }
+
   const getRoleBadgeClass = (role: string) => {
     switch (role) {
-      case "admin":
-        return "bg-purple-100 text-purple-800 border-purple-300"
-      case "manager":
-        return "bg-blue-100 text-blue-800 border-blue-300"
-      case "employee":
-        return "bg-slate-100 text-slate-800 border-slate-300"
-      default:
-        return "bg-slate-100 text-slate-800 border-slate-300"
+      case "system_admin": return "bg-red-100 text-red-800 border-red-300"
+      case "hr_manager":   return "bg-purple-100 text-purple-800 border-purple-300"
+      case "executive":    return "bg-amber-100 text-amber-800 border-amber-300"
+      case "line_manager": return "bg-blue-100 text-blue-800 border-blue-300"
+      case "employee":     return "bg-slate-100 text-slate-800 border-slate-300"
+      default:             return "bg-slate-100 text-slate-800 border-slate-300"
     }
   }
 
@@ -56,7 +62,7 @@ export function EmployeeTable({ employees, onEditEmployee, onDeleteEmployee }: E
               <TableCell>{employee.department || "N/A"}</TableCell>
               <TableCell>
                 <Badge className={getRoleBadgeClass(employee.role)} variant="outline">
-                  {employee.role}
+                  {ROLE_LABELS[employee.role] ?? employee.role}
                 </Badge>
               </TableCell>
               <TableCell>

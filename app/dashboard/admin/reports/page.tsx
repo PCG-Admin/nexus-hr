@@ -64,13 +64,13 @@ export default function ReportsPage() {
       router.push("/")
     }
 
-    if (!isLoading && user && user.role !== "admin" && user.role !== "ceo") {
+    if (!isLoading && user && !["hr_manager", "system_admin", "executive"].includes(user.role)) {
       router.push("/dashboard")
     }
   }, [user, isLoading, router])
 
   useEffect(() => {
-    if (user && (user.role === "admin" || user.role === "ceo")) {
+    if (user && ["hr_manager", "system_admin", "executive"].includes(user.role)) {
       fetchData()
     }
   }, [user, fetchData])

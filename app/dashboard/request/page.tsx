@@ -25,15 +25,19 @@ import {
 } from "@/lib/supabase/leave-service"
 
 const DEMO_TYPES: LeaveType[] = [
-  { id: "demo-annual", name: "Annual Leave", description: null, defaultDaysPerYear: 15, accrualType: "annual", requiresDocumentation: false, color: null },
-  { id: "demo-sick", name: "Sick Leave", description: null, defaultDaysPerYear: 10, accrualType: "annual", requiresDocumentation: true, color: null },
-  { id: "demo-family", name: "Family Responsibility", description: null, defaultDaysPerYear: 3, accrualType: "annual", requiresDocumentation: false, color: null },
+  { id: "demo-annual",    name: "Annual Leave",            description: null, defaultDaysPerYear: 15,  accrualType: "annual", requiresDocumentation: false, color: null },
+  { id: "demo-sick",      name: "Sick Leave",              description: null, defaultDaysPerYear: 10,  accrualType: "annual", requiresDocumentation: true,  color: null },
+  { id: "demo-family",    name: "Family Responsibility",   description: null, defaultDaysPerYear: 3,   accrualType: "annual", requiresDocumentation: false, color: null },
+  { id: "demo-maternity", name: "Maternity Leave",         description: null, defaultDaysPerYear: 120, accrualType: "fixed",  requiresDocumentation: true,  color: null },
+  { id: "demo-parental",  name: "Parental Leave",          description: null, defaultDaysPerYear: 10,  accrualType: "fixed",  requiresDocumentation: false, color: null },
 ]
 
 const DEMO_BALANCES: LeaveBalance[] = [
-  { id: "demo-1", userId: "", leaveTypeId: "demo-annual", leaveTypeName: "Annual Leave", totalDays: 15, usedDays: 0, availableDays: 15, year: new Date().getFullYear(), color: null },
-  { id: "demo-2", userId: "", leaveTypeId: "demo-sick", leaveTypeName: "Sick Leave", totalDays: 10, usedDays: 0, availableDays: 10, year: new Date().getFullYear(), color: null },
-  { id: "demo-3", userId: "", leaveTypeId: "demo-family", leaveTypeName: "Family Responsibility", totalDays: 3, usedDays: 0, availableDays: 3, year: new Date().getFullYear(), color: null },
+  { id: "demo-1", userId: "", leaveTypeId: "demo-annual",    leaveTypeName: "Annual Leave",          totalDays: 15,  usedDays: 0, availableDays: 15,  year: new Date().getFullYear(), color: null },
+  { id: "demo-2", userId: "", leaveTypeId: "demo-sick",      leaveTypeName: "Sick Leave",            totalDays: 10,  usedDays: 0, availableDays: 10,  year: new Date().getFullYear(), color: null },
+  { id: "demo-3", userId: "", leaveTypeId: "demo-family",    leaveTypeName: "Family Responsibility", totalDays: 3,   usedDays: 0, availableDays: 3,   year: new Date().getFullYear(), color: null },
+  { id: "demo-4", userId: "", leaveTypeId: "demo-maternity", leaveTypeName: "Maternity Leave",       totalDays: 120, usedDays: 0, availableDays: 120, year: new Date().getFullYear(), color: null },
+  { id: "demo-5", userId: "", leaveTypeId: "demo-parental",  leaveTypeName: "Parental Leave",        totalDays: 10,  usedDays: 0, availableDays: 10,  year: new Date().getFullYear(), color: null },
 ]
 import { getPublicHolidayDates, countWorkingDays } from "@/lib/supabase/holiday-service"
 
@@ -162,12 +166,8 @@ export default function RequestLeavePage() {
       return
     }
 
-    const balance = userBalances.find((b) => b.leaveTypeId === leaveTypeId)
-    if (balance && balance.availableDays < daysRequested) {
-      setError(`Insufficient leave balance. You have ${balance.availableDays} days available.`)
-      setIsSubmitting(false)
-      return
-    }
+    // Insufficient balance is non-blocking per SOW — surfaces as a warning (handled in UI),
+    // not a hard rejection. Request proceeds with an override flag visible to the approver.
 
     const selectedType = availableTypes.find((t) => t.id === leaveTypeId)
     if (selectedType?.requiresDocumentation && !document) {
@@ -224,6 +224,7 @@ export default function RequestLeavePage() {
 
   const selectedBalance = userBalances.find((b) => b.leaveTypeId === leaveTypeId)
   const selectedType = availableTypes.find((t) => t.id === leaveTypeId)
+  const hasInsufficientBalance = !!(selectedBalance && daysRequested > 0 && selectedBalance.availableDays < daysRequested)
 
   if (isLoading || !user) {
     return (
@@ -357,6 +358,15 @@ export default function RequestLeavePage() {
                     </div>
                   )}
 
+                  {hasInsufficientBalance && (
+                    <Alert className="border-amber-300 bg-amber-50 text-amber-900">
+                      <AlertCircle className="h-4 w-4 text-amber-600" />
+                      <AlertDescription className="text-sm">
+                        <strong>Balance Override:</strong> You have {selectedBalance?.availableDays} day{selectedBalance?.availableDays === 1 ? "" : "s"} available but are requesting {daysRequested} days. You can still submit — your manager will be notified and can authorise the override.
+                      </AlertDescription>
+                    </Alert>
+                  )}
+
                   <div className="space-y-2">
                     <Label htmlFor="reason">Reason (Optional)</Label>
                     <Textarea
@@ -418,8 +428,12 @@ export default function RequestLeavePage() {
                   </Alert>
 
                   <div className="flex gap-3">
-                    <Button type="submit" className="flex-1" disabled={isSubmitting}>
-                      {isSubmitting ? "Submitting..." : "Submit Request"}
+                    <Button
+                      type="submit"
+                      className={`flex-1 ${hasInsufficientBalance ? "bg-amber-600 hover:bg-amber-700" : ""}`}
+                      disabled={isSubmitting}
+                    >
+                      {isSubmitting ? "Submitting..." : hasInsufficientBalance ? "Submit Override Request" : "Submit Request"}
                     </Button>
                     <Button type="button" variant="outline" onClick={() => router.push("/dashboard")}>
                       Cancel

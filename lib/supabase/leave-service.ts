@@ -1,5 +1,6 @@
 import { createClient } from './client'
 import type { Database } from './types'
+import type { UserRole } from '@/lib/auth'
 
 const isDbConfigured = () =>
   process.env.NEXT_PUBLIC_SUPABASE_URL !== 'https://placeholder.supabase.co'
@@ -164,7 +165,7 @@ export async function getLeaveRequests(userId: string): Promise<LeaveRequest[]> 
 // Submit a new leave request
 export async function submitLeaveRequest(request: {
   userId: string
-  userRole?: 'employee' | 'manager' | 'admin' | 'ceo'
+  userRole?: UserRole
   leaveTypeId: string
   startDate: string
   endDate: string
@@ -173,10 +174,11 @@ export async function submitLeaveRequest(request: {
   documentUrl?: string
   employeeName?: string
 }): Promise<{ success: boolean; error?: string; data?: LeaveRequest }> {
+  if (!isDbConfigured()) return { success: true }
   const supabase = createClient()
 
-  // Managers/admins skip the manager stage and go straight to CEO
-  const isElevatedRole = request.userRole === 'manager' || request.userRole === 'admin' || request.userRole === 'ceo'
+  // Managers/admins bypass stage-1 and go straight to final-approval queue
+  const isElevatedRole = request.userRole === 'line_manager' || request.userRole === 'hr_manager' || request.userRole === 'system_admin'
   const initialStatus = isElevatedRole ? 'pending_ceo' : 'pending'
 
   const insertData: LeaveRequestInsert = {
@@ -271,7 +273,7 @@ export async function uploadDocument(file: File, userId: string): Promise<{ succ
   return { success: true, url: urlData.publicUrl }
 }
 
-// Type for employee info
+// Type for employee info (mirrors User fields from lib/auth)
 export type Employee = {
   id: string
   email: string
@@ -279,8 +281,22 @@ export type Employee = {
   lastName: string
   employeeNumber: string | null
   department: string | null
-  role: 'employee' | 'manager' | 'admin' | 'ceo'
+  role: UserRole
+  grade: number | null
   hireDate: string | null
+  jobTitle: string | null
+  employmentType: 'permanent' | 'fixed_term' | 'probation' | null
+  phone: string | null
+  personalEmail: string | null
+  address: string | null
+  city: string | null
+  postalCode: string | null
+  emergencyContactName: string | null
+  emergencyContactPhone: string | null
+  emergencyContactRelationship: string | null
+  managerId: string | null
+  idNumber: string | null
+  dateOfBirth: string | null
 }
 
 // Extended leave request with employee info for approvals
@@ -508,10 +524,24 @@ export async function getAllEmployees(): Promise<Employee[]> {
     email: row.email,
     firstName: row.first_name,
     lastName: row.last_name,
-    employeeNumber: row.employee_number,
-    department: row.department,
+    employeeNumber: row.employee_number ?? null,
+    department: row.department ?? null,
     role: row.role,
-    hireDate: row.hire_date,
+    grade: (row as any).grade ?? null,
+    hireDate: row.hire_date ?? null,
+    jobTitle: (row as any).job_title ?? null,
+    employmentType: (row as any).employment_type ?? null,
+    phone: (row as any).phone ?? null,
+    personalEmail: (row as any).personal_email ?? null,
+    address: (row as any).address ?? null,
+    city: (row as any).city ?? null,
+    postalCode: (row as any).postal_code ?? null,
+    emergencyContactName: (row as any).emergency_contact_name ?? null,
+    emergencyContactPhone: (row as any).emergency_contact_phone ?? null,
+    emergencyContactRelationship: (row as any).emergency_contact_relationship ?? null,
+    managerId: (row as any).manager_id ?? null,
+    idNumber: (row as any).id_number ?? null,
+    dateOfBirth: (row as any).date_of_birth ?? null,
   }))
 }
 
@@ -663,17 +693,33 @@ export async function updateLeaveBalance(
   return { success: true }
 }
 
-// Update an employee (admin only)
+// Update an employee (HR/admin only)
 export async function updateEmployee(
   employeeId: string,
   data: {
     firstName: string
     lastName: string
     email: string
-    role: 'employee' | 'manager' | 'admin' | 'ceo'
+    role: UserRole
     department: string | null
+    grade: number | null
+    jobTitle: string | null
+    employmentType: 'permanent' | 'fixed_term' | 'probation' | null
+    hireDate: string | null
+    managerId: string | null
+    phone: string | null
+    personalEmail: string | null
+    address: string | null
+    city: string | null
+    postalCode: string | null
+    emergencyContactName: string | null
+    emergencyContactPhone: string | null
+    emergencyContactRelationship: string | null
+    idNumber: string | null
+    dateOfBirth: string | null
   }
 ): Promise<{ success: boolean; error?: string }> {
+  if (!isDbConfigured()) return { success: true }
   const supabase = createClient()
 
   const { error } = await supabase
@@ -684,6 +730,21 @@ export async function updateEmployee(
       email: data.email,
       role: data.role,
       department: data.department,
+      grade: data.grade,
+      job_title: data.jobTitle,
+      employment_type: data.employmentType,
+      hire_date: data.hireDate,
+      manager_id: data.managerId,
+      phone: data.phone,
+      personal_email: data.personalEmail,
+      address: data.address,
+      city: data.city,
+      postal_code: data.postalCode,
+      emergency_contact_name: data.emergencyContactName,
+      emergency_contact_phone: data.emergencyContactPhone,
+      emergency_contact_relationship: data.emergencyContactRelationship,
+      id_number: data.idNumber,
+      date_of_birth: data.dateOfBirth,
       updated_at: new Date().toISOString(),
     })
     .eq('id', employeeId)

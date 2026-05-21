@@ -19,9 +19,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { AlertCircle, CheckCircle2, Mail } from "lucide-react"
 import { updateEmployee, type Employee } from "@/lib/supabase/leave-service"
+import { type UserRole } from "@/lib/auth"
 
 type EditEmployeeDialogProps = {
   employee: Employee | null
@@ -30,32 +32,82 @@ type EditEmployeeDialogProps = {
   onSuccess: () => void
 }
 
+type FormData = {
+  // Employment
+  firstName: string
+  lastName: string
+  email: string
+  employeeNumber: string
+  role: UserRole
+  jobTitle: string
+  employmentType: string
+  department: string
+  grade: string
+  hireDate: string
+  managerId: string
+  // Contact
+  phone: string
+  personalEmail: string
+  address: string
+  city: string
+  postalCode: string
+  // Emergency
+  emergencyContactName: string
+  emergencyContactPhone: string
+  emergencyContactRelationship: string
+  // Identity
+  idNumber: string
+  dateOfBirth: string
+}
+
+const EMPTY: FormData = {
+  firstName: "", lastName: "", email: "", employeeNumber: "",
+  role: "employee", jobTitle: "", employmentType: "", department: "",
+  grade: "", hireDate: "", managerId: "",
+  phone: "", personalEmail: "", address: "", city: "", postalCode: "",
+  emergencyContactName: "", emergencyContactPhone: "", emergencyContactRelationship: "",
+  idNumber: "", dateOfBirth: "",
+}
+
 export function EditEmployeeDialog({ employee, isOpen, onClose, onSuccess }: EditEmployeeDialogProps) {
-  const [formData, setFormData] = useState({
-    firstName: "",
-    lastName: "",
-    email: "",
-    role: "employee" as "employee" | "manager" | "admin" | "ceo",
-    department: "",
-  })
+  const [formData, setFormData] = useState<FormData>(EMPTY)
   const [error, setError] = useState("")
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isSendingEmail, setIsSendingEmail] = useState(false)
   const [emailStatus, setEmailStatus] = useState<"idle" | "sent" | "error">("idle")
 
+  const set = (field: keyof FormData) => (e: React.ChangeEvent<HTMLInputElement>) =>
+    setFormData((prev) => ({ ...prev, [field]: e.target.value }))
+
   useEffect(() => {
-    if (employee) {
+    if (employee && isOpen) {
       setFormData({
         firstName: employee.firstName,
         lastName: employee.lastName,
         email: employee.email,
-        role: employee.role,
-        department: employee.department || "",
+        employeeNumber: employee.employeeNumber ?? "",
+        role: employee.role as UserRole,
+        jobTitle: employee.jobTitle ?? "",
+        employmentType: employee.employmentType ?? "",
+        department: employee.department ?? "",
+        grade: employee.grade?.toString() ?? "",
+        hireDate: employee.hireDate ?? "",
+        managerId: employee.managerId ?? "",
+        phone: employee.phone ?? "",
+        personalEmail: employee.personalEmail ?? "",
+        address: employee.address ?? "",
+        city: employee.city ?? "",
+        postalCode: employee.postalCode ?? "",
+        emergencyContactName: employee.emergencyContactName ?? "",
+        emergencyContactPhone: employee.emergencyContactPhone ?? "",
+        emergencyContactRelationship: employee.emergencyContactRelationship ?? "",
+        idNumber: employee.idNumber ?? "",
+        dateOfBirth: employee.dateOfBirth ?? "",
       })
       setEmailStatus("idle")
       setError("")
     }
-  }, [employee])
+  }, [employee, isOpen])
 
   const handleSendSetupEmail = async () => {
     if (!employee) return
@@ -68,12 +120,8 @@ export function EditEmployeeDialog({ employee, isOpen, onClose, onSuccess }: Edi
         body: JSON.stringify({ email: employee.email, firstName: employee.firstName }),
       })
       const data = await res.json()
-      if (res.ok && data.success) {
-        setEmailStatus("sent")
-      } else {
-        setEmailStatus("error")
-        setError(data.error ?? "Failed to send setup email")
-      }
+      setEmailStatus(res.ok && data.success ? "sent" : "error")
+      if (!res.ok) setError(data.error ?? "Failed to send setup email")
     } catch {
       setEmailStatus("error")
       setError("An unexpected error occurred")
@@ -83,16 +131,14 @@ export function EditEmployeeDialog({ employee, isOpen, onClose, onSuccess }: Edi
 
   const handleSubmit = async () => {
     if (!employee) return
-
     setError("")
 
     if (!formData.email || !formData.firstName || !formData.lastName) {
-      setError("Please fill in all required fields")
+      setError("First name, last name and email are required")
       return
     }
 
     setIsSubmitting(true)
-
     try {
       const result = await updateEmployee(employee.id, {
         firstName: formData.firstName,
@@ -100,6 +146,21 @@ export function EditEmployeeDialog({ employee, isOpen, onClose, onSuccess }: Edi
         email: formData.email,
         role: formData.role,
         department: formData.department || null,
+        grade: formData.grade ? parseInt(formData.grade) : null,
+        jobTitle: formData.jobTitle || null,
+        employmentType: (formData.employmentType as any) || null,
+        hireDate: formData.hireDate || null,
+        managerId: formData.managerId || null,
+        phone: formData.phone || null,
+        personalEmail: formData.personalEmail || null,
+        address: formData.address || null,
+        city: formData.city || null,
+        postalCode: formData.postalCode || null,
+        emergencyContactName: formData.emergencyContactName || null,
+        emergencyContactPhone: formData.emergencyContactPhone || null,
+        emergencyContactRelationship: formData.emergencyContactRelationship || null,
+        idNumber: formData.idNumber || null,
+        dateOfBirth: formData.dateOfBirth || null,
       })
 
       if (!result.success) {
@@ -109,7 +170,7 @@ export function EditEmployeeDialog({ employee, isOpen, onClose, onSuccess }: Edi
 
       onSuccess()
       onClose()
-    } catch (err) {
+    } catch {
       setError("An unexpected error occurred")
     } finally {
       setIsSubmitting(false)
@@ -121,99 +182,178 @@ export function EditEmployeeDialog({ employee, isOpen, onClose, onSuccess }: Edi
     onClose()
   }
 
+  const field = (id: keyof FormData, label: string, type = "text", placeholder = "") => (
+    <div className="space-y-1.5">
+      <Label htmlFor={id}>{label}</Label>
+      <Input
+        id={id}
+        type={type}
+        value={formData[id]}
+        onChange={set(id)}
+        disabled={isSubmitting}
+        placeholder={placeholder}
+      />
+    </div>
+  )
+
   return (
     <Dialog open={isOpen} onOpenChange={handleClose}>
-      <DialogContent className="sm:max-w-[620px]">
+      <DialogContent className="sm:max-w-[680px] max-h-[90vh] flex flex-col">
         <DialogHeader>
-          <DialogTitle>Edit Employee</DialogTitle>
+          <DialogTitle>
+            {employee ? `${employee.firstName} ${employee.lastName}` : "Edit Employee"}
+          </DialogTitle>
           <DialogDescription>
-            Update employee information. Changes will be saved immediately.
+            Full profile management. Changes are saved when you click Save.
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4 py-4">
-          {error && (
-            <Alert variant="destructive">
-              <AlertCircle className="h-4 w-4" />
-              <AlertDescription>{error}</AlertDescription>
-            </Alert>
-          )}
+        {error && (
+          <Alert variant="destructive" className="mx-0">
+            <AlertCircle className="h-4 w-4" />
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
 
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="firstName">First Name *</Label>
-              <Input
-                id="firstName"
-                value={formData.firstName}
-                onChange={(e) => setFormData({ ...formData, firstName: e.target.value })}
-                disabled={isSubmitting}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="lastName">Last Name *</Label>
-              <Input
-                id="lastName"
-                value={formData.lastName}
-                onChange={(e) => setFormData({ ...formData, lastName: e.target.value })}
-                disabled={isSubmitting}
-              />
-            </div>
+        <Tabs defaultValue="employment" className="flex-1 overflow-hidden flex flex-col">
+          <TabsList className="shrink-0">
+            <TabsTrigger value="employment">Employment</TabsTrigger>
+            <TabsTrigger value="contact">Contact</TabsTrigger>
+            <TabsTrigger value="emergency">Emergency</TabsTrigger>
+            <TabsTrigger value="identity">Identity</TabsTrigger>
+          </TabsList>
+
+          <div className="overflow-y-auto flex-1 mt-4 pr-1">
+
+            {/* ── Employment tab ─────────────────────────────── */}
+            <TabsContent value="employment" className="space-y-4 mt-0">
+              <div className="grid grid-cols-2 gap-4">
+                {field("firstName",      "First Name *",      "text", "John")}
+                {field("lastName",       "Last Name *",       "text", "Doe")}
+                {field("email",          "Work Email *",      "email", "john@company.com")}
+                {field("employeeNumber", "Employee Number",   "text", "EMP001")}
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <Label>Role *</Label>
+                  <Select
+                    value={formData.role}
+                    onValueChange={(v: UserRole) => setFormData((p) => ({ ...p, role: v }))}
+                    disabled={isSubmitting}
+                  >
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="employee">Employee</SelectItem>
+                      <SelectItem value="line_manager">Line Manager</SelectItem>
+                      <SelectItem value="hr_manager">HR Manager</SelectItem>
+                      <SelectItem value="executive">Executive</SelectItem>
+                      <SelectItem value="system_admin">System Admin</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label>Employment Type</Label>
+                  <Select
+                    value={formData.employmentType}
+                    onValueChange={(v) => setFormData((p) => ({ ...p, employmentType: v }))}
+                    disabled={isSubmitting}
+                  >
+                    <SelectTrigger><SelectValue placeholder="Select type" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="permanent">Permanent</SelectItem>
+                      <SelectItem value="fixed_term">Fixed-Term Contract</SelectItem>
+                      <SelectItem value="probation">Probationary</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                {field("jobTitle",   "Job Title",   "text", "Sales Consultant")}
+                <div className="space-y-1.5">
+                  <Label>Department</Label>
+                  <Select
+                    value={formData.department}
+                    onValueChange={(v) => setFormData((p) => ({ ...p, department: v }))}
+                    disabled={isSubmitting}
+                  >
+                    <SelectTrigger><SelectValue placeholder="Select department" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Technical">Technical</SelectItem>
+                      <SelectItem value="Sales">Sales</SelectItem>
+                      <SelectItem value="Management">Management</SelectItem>
+                      <SelectItem value="Marketing">Marketing</SelectItem>
+                      <SelectItem value="Human Resources">Human Resources</SelectItem>
+                      <SelectItem value="Administration">Administration</SelectItem>
+                      <SelectItem value="Executive">Executive</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                {field("grade",    "Grade",     "number", "1")}
+                {field("hireDate", "Hire Date", "date")}
+              </div>
+            </TabsContent>
+
+            {/* ── Contact tab ────────────────────────────────── */}
+            <TabsContent value="contact" className="space-y-4 mt-0">
+              <div className="grid grid-cols-2 gap-4">
+                {field("phone",         "Mobile Number",  "tel",   "+27 82 000 0000")}
+                {field("personalEmail", "Personal Email", "email", "name@gmail.com")}
+              </div>
+              {field("address", "Street Address", "text", "12 Oak Street, Sandton")}
+              <div className="grid grid-cols-2 gap-4">
+                {field("city",       "City",        "text", "Johannesburg")}
+                {field("postalCode", "Postal Code", "text", "2196")}
+              </div>
+            </TabsContent>
+
+            {/* ── Emergency tab ──────────────────────────────── */}
+            <TabsContent value="emergency" className="space-y-4 mt-0">
+              {field("emergencyContactName",  "Contact Full Name", "text", "Jane Doe")}
+              <div className="grid grid-cols-2 gap-4">
+                {field("emergencyContactPhone", "Contact Phone", "tel", "+27 71 000 0000")}
+                <div className="space-y-1.5">
+                  <Label>Relationship</Label>
+                  <Select
+                    value={formData.emergencyContactRelationship}
+                    onValueChange={(v) => setFormData((p) => ({ ...p, emergencyContactRelationship: v }))}
+                    disabled={isSubmitting}
+                  >
+                    <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Spouse">Spouse</SelectItem>
+                      <SelectItem value="Partner">Partner</SelectItem>
+                      <SelectItem value="Parent">Parent</SelectItem>
+                      <SelectItem value="Sibling">Sibling</SelectItem>
+                      <SelectItem value="Child">Child</SelectItem>
+                      <SelectItem value="Friend">Friend</SelectItem>
+                      <SelectItem value="Other">Other</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            </TabsContent>
+
+            {/* ── Identity tab ───────────────────────────────── */}
+            <TabsContent value="identity" className="space-y-4 mt-0">
+              <div className="grid grid-cols-2 gap-4">
+                {field("idNumber",    "SA ID / Passport Number", "text", "8001010000000")}
+                {field("dateOfBirth", "Date of Birth",           "date")}
+              </div>
+              <p className="text-xs text-muted-foreground bg-amber-50 border border-amber-200 rounded-lg px-4 py-3">
+                Sensitive data — visible to HR and the employee only. Handle in compliance with POPIA.
+              </p>
+            </TabsContent>
+
           </div>
+        </Tabs>
 
-          <div className="space-y-2">
-            <Label htmlFor="email">Email *</Label>
-            <Input
-              id="email"
-              type="email"
-              value={formData.email}
-              onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-              disabled={isSubmitting}
-            />
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="role">Role *</Label>
-            <Select
-              value={formData.role}
-              onValueChange={(value: "employee" | "manager" | "admin" | "ceo") =>
-                setFormData({ ...formData, role: value })
-              }
-              disabled={isSubmitting}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Select a role" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="employee">Employee</SelectItem>
-                <SelectItem value="manager">Manager</SelectItem>
-                <SelectItem value="admin">Admin</SelectItem>
-                <SelectItem value="ceo">CEO</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="department">Department</Label>
-            <Select
-              value={formData.department}
-              onValueChange={(value) => setFormData({ ...formData, department: value })}
-              disabled={isSubmitting}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Select department" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="Technical">Technical</SelectItem>
-                <SelectItem value="Sales">Sales</SelectItem>
-                <SelectItem value="Management">Management</SelectItem>
-                <SelectItem value="Marketing">Marketing</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
-
-        <DialogFooter className="flex-col sm:flex-row gap-2 sm:items-center sm:justify-between">
-          {/* Setup email — left side */}
+        <DialogFooter className="flex-col sm:flex-row gap-2 sm:items-center sm:justify-between pt-4 border-t mt-2 shrink-0">
           <div className="flex items-center gap-2">
             <Button
               type="button"
@@ -235,8 +375,6 @@ export function EditEmployeeDialog({ employee, isOpen, onClose, onSuccess }: Edi
               <span className="text-xs text-red-500">Failed</span>
             )}
           </div>
-
-          {/* Save / Cancel — right side */}
           <div className="flex gap-2">
             <Button variant="outline" onClick={handleClose} disabled={isSubmitting}>
               Cancel

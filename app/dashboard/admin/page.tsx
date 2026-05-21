@@ -32,6 +32,7 @@ import {
   deletePublicHoliday,
   type PublicHoliday,
 } from "@/lib/supabase/holiday-service"
+import { DEMO_EMPLOYEES } from "@/lib/demo-data"
 
 export default function AdminDashboardPage() {
   const { user, isLoading } = useAuth()
@@ -63,6 +64,7 @@ export default function AdminDashboardPage() {
     setIsLoadingData(true)
     const dbReady = !!(process.env.NEXT_PUBLIC_SUPABASE_URL && !process.env.NEXT_PUBLIC_SUPABASE_URL.includes('placeholder'))
     if (!dbReady) {
+      setEmployees(DEMO_EMPLOYEES)
       setIsLoadingData(false)
       return
     }
@@ -130,20 +132,20 @@ export default function AdminDashboardPage() {
       router.push("/")
     }
 
-    if (!isLoading && user && user.role !== "admin" && user.role !== "ceo") {
+    if (!isLoading && user && !["hr_manager", "system_admin"].includes(user.role)) {
       router.push("/dashboard")
     }
   }, [user, isLoading, router])
 
   useEffect(() => {
-    if (user && (user.role === "admin" || user.role === "ceo")) {
+    if (user && ["hr_manager", "system_admin"].includes(user.role)) {
       fetchData()
       fetchHolidays()
     }
   }, [user, fetchData, fetchHolidays])
 
   useEffect(() => {
-    if (user && (user.role === "admin" || user.role === "ceo")) {
+    if (user && ["hr_manager", "system_admin"].includes(user.role)) {
       fetchHolidays()
     }
   }, [holidayYear, user, fetchHolidays])
