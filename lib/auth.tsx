@@ -106,19 +106,53 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const supabase = createClient()
     let mounted = true
 
+    function clearStaleSession() {
+      localStorage.removeItem('nexus-hr-auth')
+      clearRoleCookie()
+    }
+
+    async function loadUser(userId: string) {
+      const employee = await fetchEmployee(userId)
+      if (mounted && employee) {
+        setUser(employee)
+        setRoleCookie(employee.role)
+      } else if (mounted) {
+        clearStaleSession()
+      }
+    }
+
     async function init() {
       try {
+        // Step 1: read localStorage — fast, no network, no hang risk.
         const { data: { session } } = await supabase.auth.getSession()
         if (!mounted) return
-        if (session?.user) {
-          const employee = await fetchEmployee(session.user.id)
-          if (mounted && employee) {
-            setUser(employee)
-            setRoleCookie(employee.role)
-          }
+
+        if (!session?.user) {
+          // No stored session at all — show login immediately, no network call needed.
+          return
         }
+
+        // Step 2: session exists in localStorage — validate it with the server.
+        // Race against 5 s: if VS Code webview hangs on the refresh network call,
+        // we clear the stale session and show login instead of freezing forever.
+        // Timeout resolves (not rejects) so we don't throw and skip the finally.
+        const { data: { user: authUser }, error } = await Promise.race([
+          supabase.auth.getUser(),
+          new Promise<{ data: { user: null }; error: Error }>(resolve =>
+            setTimeout(() => resolve({ data: { user: null }, error: new Error('timeout') }), 5000)
+          ),
+        ])
+
+        if (!mounted) return
+
+        if (error || !authUser) {
+          clearStaleSession()
+          return
+        }
+
+        await loadUser(authUser.id)
       } catch {
-        // any error — leave user null, redirect to login will follow
+        if (mounted) clearStaleSession()
       } finally {
         if (mounted) setIsLoading(false)
       }
@@ -126,30 +160,40 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     init()
 
-    // Keep session in sync across tabs
+    // Re-validate when the tab becomes visible again — catches the
+    // "left it for an hour, background timer was throttled" case.
+    // Only runs if there is actually a stored session to validate.
+    async function handleVisibilityChange() {
+      if (document.visibilityState !== 'visible') return
+      if (!localStorage.getItem('nexus-hr-auth')) return
+      try {
+        const { data: { user: authUser }, error } = await supabase.auth.getUser()
+        if (!mounted) return
+        if (error || !authUser) {
+          setUser(null)
+          clearStaleSession()
+        }
+      } catch {
+        // network failure — onAuthStateChange SIGNED_OUT will handle it
+      }
+    }
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+
+    // Keep session in sync across tabs and on token refresh / expiry
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (!mounted) return
-      if (event === "SIGNED_IN" && session?.user) {
-        const employee = await fetchEmployee(session.user.id)
-        if (mounted && employee) {
-          setUser(employee)
-          setRoleCookie(employee.role)
-        }
-      } else if (event === "SIGNED_OUT") {
+      if ((event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') && session?.user) {
+        await loadUser(session.user.id)
+      } else if (event === 'SIGNED_OUT') {
         setUser(null)
-        clearRoleCookie()
-      } else if (event === "TOKEN_REFRESHED" && session?.user) {
-        const employee = await fetchEmployee(session.user.id)
-        if (mounted && employee) {
-          setUser(employee)
-          setRoleCookie(employee.role)
-        }
+        clearStaleSession()
       }
     })
 
     return () => {
       mounted = false
       subscription.unsubscribe()
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
     }
   }, [fetchEmployee]) // eslint-disable-line react-hooks/exhaustive-deps
 
