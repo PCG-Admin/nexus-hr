@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js'
-import { createClient as createServerClient } from '@/lib/supabase/server'
 import { NextResponse } from 'next/server'
+import { getApiUser } from '@/lib/supabase/api-auth'
+import type { NextRequest } from 'next/server'
 
 function getSupabaseAdmin() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL
@@ -11,14 +12,14 @@ function getSupabaseAdmin() {
   })
 }
 
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
   try {
-    // Verify caller is an authenticated admin
-    const supabase = await createServerClient()
-    const { data: { user: currentUser } } = await supabase.auth.getUser()
+    const currentUser = await getApiUser(request)
     if (!currentUser) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-    const { data: profile } = await supabase
+    const supabaseAdmin = getSupabaseAdmin()
+
+    const { data: profile } = await supabaseAdmin
       .from('employees' as any)
       .select('role')
       .eq('id', currentUser.id)
@@ -31,20 +32,14 @@ export async function POST(request: Request) {
     const body = await request.json()
     const { email, firstName } = body
 
-    if (!email || !firstName) {
-      return NextResponse.json({ error: 'email and firstName are required' }, { status: 400 })
-    }
+    if (!email || !firstName) return NextResponse.json({ error: 'email and firstName are required' }, { status: 400 })
 
     const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000'
-    const supabaseAdmin = getSupabaseAdmin()
 
-    // Generate a one-time password recovery link
     const { data: linkData, error: linkError } = await supabaseAdmin.auth.admin.generateLink({
       type: 'recovery',
       email,
-      options: {
-        redirectTo: `${siteUrl}/auth/callback`,
-      },
+      options: { redirectTo: `${siteUrl}/auth/callback` },
     })
 
     if (linkError || !linkData?.properties?.hashed_token) {
@@ -54,7 +49,6 @@ export async function POST(request: Request) {
 
     const setupLink = `${siteUrl}/auth/setup?h=${encodeURIComponent(linkData.properties.hashed_token)}`
 
-    // Fire Make webhook if configured
     const makeWebhookUrl = process.env.MAKE_WEBHOOK_URL
     if (makeWebhookUrl) {
       try {
@@ -64,11 +58,8 @@ export async function POST(request: Request) {
           body: JSON.stringify({ email, firstName, setupLink }),
         })
       } catch (webhookErr) {
-        // Non-fatal — log but don't fail the response
         console.error('Make webhook error:', webhookErr)
       }
-    } else {
-      console.warn('MAKE_WEBHOOK_URL not set — setup email not sent for:', email)
     }
 
     return NextResponse.json({ success: true, makeConfigured: !!makeWebhookUrl })

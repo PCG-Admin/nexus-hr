@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import {
   Dialog,
   DialogContent,
@@ -21,10 +21,11 @@ import {
 } from "@/components/ui/select"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { AlertCircle, CheckCircle2, Mail } from "lucide-react"
-import { updateEmployee, type Employee } from "@/lib/supabase/leave-service"
-import { type UserRole } from "@/lib/auth"
+import { AlertCircle, CheckCircle2, Mail, Clock } from "lucide-react"
+import { updateEmployee, getAllEmployees, getEmployeeAuditTrail, type Employee, type EmployeeFieldChange, type EmployeeAuditEntry } from "@/lib/supabase/leave-service"
+import { useAuth, type UserRole } from "@/lib/auth"
 import { getOrgConfig } from "@/lib/org-config"
+import { apiFetch } from "@/lib/api-fetch"
 
 type EditEmployeeDialogProps = {
   employee: Employee | null
@@ -70,21 +71,41 @@ const EMPTY: FormData = {
   idNumber: "", dateOfBirth: "",
 }
 
+const ROLE_LABELS: Record<string, string> = {
+  employee: 'Employee', line_manager: 'Line Manager', hr_manager: 'HR Manager',
+  executive: 'Executive', system_admin: 'System Admin',
+}
+const EMPLOYMENT_LABELS: Record<string, string> = {
+  permanent: 'Permanent', fixed_term: 'Fixed-Term Contract', probation: 'Probationary',
+}
+
 export function EditEmployeeDialog({ employee, isOpen, onClose, onSuccess }: EditEmployeeDialogProps) {
+  const { user } = useAuth()
   const [formData, setFormData] = useState<FormData>(EMPTY)
   const [error, setError] = useState("")
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isSendingEmail, setIsSendingEmail] = useState(false)
   const [emailStatus, setEmailStatus] = useState<"idle" | "sent" | "error">("idle")
   const [orgConfig, setOrgConfigState] = useState(() => getOrgConfig())
+  const [allEmployees, setAllEmployees] = useState<Employee[]>([])
+  const [auditTrail, setAuditTrail] = useState<EmployeeAuditEntry[]>([])
+  // snapshot of original values when dialog opens — used for diff at save time
+  const originalSnapshot = useRef<FormData>(EMPTY)
 
   const set = (field: keyof FormData) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setFormData((prev) => ({ ...prev, [field]: e.target.value }))
 
   useEffect(() => {
+    if (isOpen && employee) {
+      getAllEmployees().then(setAllEmployees)
+      getEmployeeAuditTrail(employee.id).then(setAuditTrail)
+    }
+  }, [isOpen, employee])
+
+  useEffect(() => {
     if (employee && isOpen) {
       setOrgConfigState(getOrgConfig())
-      setFormData({
+      const snap: FormData = {
         firstName: employee.firstName,
         lastName: employee.lastName,
         email: employee.email,
@@ -106,7 +127,9 @@ export function EditEmployeeDialog({ employee, isOpen, onClose, onSuccess }: Edi
         emergencyContactRelationship: employee.emergencyContactRelationship ?? "",
         idNumber: employee.idNumber ?? "",
         dateOfBirth: employee.dateOfBirth ?? "",
-      })
+      }
+      setFormData(snap)
+      originalSnapshot.current = snap
       setEmailStatus("idle")
       setError("")
     }
@@ -117,9 +140,8 @@ export function EditEmployeeDialog({ employee, isOpen, onClose, onSuccess }: Edi
     setIsSendingEmail(true)
     setEmailStatus("idle")
     try {
-      const res = await fetch("/api/admin/send-setup-email", {
+      const res = await apiFetch("/api/admin/send-setup-email", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: employee.email, firstName: employee.firstName }),
       })
       const data = await res.json()
@@ -130,6 +152,41 @@ export function EditEmployeeDialog({ employee, isOpen, onClose, onSuccess }: Edi
       setError("An unexpected error occurred")
     }
     setIsSendingEmail(false)
+  }
+
+  const buildChanges = (): EmployeeFieldChange[] => {
+    const orig = originalSnapshot.current
+    const FIELD_META: { field: keyof FormData; label: string; format?: (v: string) => string }[] = [
+      { field: 'firstName',                    label: 'First Name' },
+      { field: 'lastName',                     label: 'Last Name' },
+      { field: 'email',                        label: 'Work Email' },
+      { field: 'employeeNumber',               label: 'Employee Number' },
+      { field: 'role',                         label: 'Role',            format: v => ROLE_LABELS[v] ?? v },
+      { field: 'jobTitle',                     label: 'Job Title' },
+      { field: 'employmentType',               label: 'Employment Type', format: v => EMPLOYMENT_LABELS[v] ?? v },
+      { field: 'department',                   label: 'Department' },
+      { field: 'grade',                        label: 'Grade',           format: v => v ? `Grade ${v}` : '' },
+      { field: 'hireDate',                     label: 'Hire Date' },
+      { field: 'managerId',                    label: 'Manager',         format: v => { const m = allEmployees.find(e => e.id === v); return m ? `${m.firstName} ${m.lastName}` : v } },
+      { field: 'phone',                        label: 'Mobile Number' },
+      { field: 'personalEmail',                label: 'Personal Email' },
+      { field: 'address',                      label: 'Address' },
+      { field: 'city',                         label: 'City' },
+      { field: 'postalCode',                   label: 'Postal Code' },
+      { field: 'emergencyContactName',         label: 'Emergency Contact Name' },
+      { field: 'emergencyContactPhone',        label: 'Emergency Contact Phone' },
+      { field: 'emergencyContactRelationship', label: 'Emergency Contact Relationship' },
+      { field: 'idNumber',                     label: 'ID Number' },
+      { field: 'dateOfBirth',                  label: 'Date of Birth' },
+    ]
+    return FIELD_META
+      .filter(({ field }) => (orig[field] ?? '') !== (formData[field] ?? ''))
+      .map(({ field, label, format }) => ({
+        field,
+        label,
+        previousValue: orig[field] ? (format ? format(orig[field]) : orig[field]) : null,
+        newValue:      formData[field] ? (format ? format(formData[field]) : formData[field]) : null,
+      }))
   }
 
   const handleSubmit = async () => {
@@ -143,6 +200,7 @@ export function EditEmployeeDialog({ employee, isOpen, onClose, onSuccess }: Edi
 
     setIsSubmitting(true)
     try {
+      const changes = buildChanges()
       const result = await updateEmployee(employee.id, {
         firstName: formData.firstName,
         lastName: formData.lastName,
@@ -164,13 +222,16 @@ export function EditEmployeeDialog({ employee, isOpen, onClose, onSuccess }: Edi
         emergencyContactRelationship: formData.emergencyContactRelationship || null,
         idNumber: formData.idNumber || null,
         dateOfBirth: formData.dateOfBirth || null,
-      })
+      }, user ? { actorId: user.id, actorName: `${user.firstName} ${user.lastName}`, changes } : undefined)
 
       if (!result.success) {
         setError(result.error || "Failed to update employee")
         return
       }
 
+      if (employee && changes.length > 0) {
+        getEmployeeAuditTrail(employee.id).then(setAuditTrail)
+      }
       onSuccess()
       onClose()
     } catch {
@@ -224,6 +285,12 @@ export function EditEmployeeDialog({ employee, isOpen, onClose, onSuccess }: Edi
             <TabsTrigger value="contact">Contact</TabsTrigger>
             <TabsTrigger value="emergency">Emergency</TabsTrigger>
             <TabsTrigger value="identity">Identity</TabsTrigger>
+            <TabsTrigger value="history">
+              History
+              {auditTrail.length > 0 && (
+                <span className="ml-1.5 text-xs bg-muted rounded-full px-1.5 py-0.5">{auditTrail.length}</span>
+              )}
+            </TabsTrigger>
           </TabsList>
 
           <div className="overflow-y-auto flex-1 mt-4 pr-1">
@@ -310,6 +377,27 @@ export function EditEmployeeDialog({ employee, isOpen, onClose, onSuccess }: Edi
                 </div>
                 {field("hireDate", "Hire Date", "date")}
               </div>
+
+              <div className="space-y-1.5">
+                <Label>Reports To (Manager)</Label>
+                <Select
+                  value={formData.managerId || "none"}
+                  onValueChange={(v) => setFormData((p) => ({ ...p, managerId: v === "none" ? "" : v }))}
+                  disabled={isSubmitting}
+                >
+                  <SelectTrigger><SelectValue placeholder="Select manager" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">— No manager —</SelectItem>
+                    {allEmployees
+                      .filter(e => e.id !== employee?.id && e.isActive)
+                      .map(e => (
+                        <SelectItem key={e.id} value={e.id}>
+                          {e.firstName} {e.lastName} ({e.role.replace('_', ' ')})
+                        </SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select>
+              </div>
             </TabsContent>
 
             {/* ── Contact tab ────────────────────────────────── */}
@@ -361,6 +449,59 @@ export function EditEmployeeDialog({ employee, isOpen, onClose, onSuccess }: Edi
               <p className="text-xs text-muted-foreground bg-amber-50 border border-amber-200 rounded-lg px-4 py-3">
                 Sensitive data — visible to HR and the employee only. Handle in compliance with POPIA.
               </p>
+            </TabsContent>
+
+            {/* ── History tab ────────────────────────────────── */}
+            <TabsContent value="history" className="mt-0">
+              {auditTrail.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-10 text-center">
+                  <Clock className="w-8 h-8 text-muted-foreground mb-2" />
+                  <p className="text-sm text-muted-foreground">No changes recorded yet</p>
+                  <p className="text-xs text-muted-foreground mt-1">Changes will appear here after the first edit is saved</p>
+                </div>
+              ) : (
+                <div className="relative space-y-0">
+                  {auditTrail.map((entry, idx) => (
+                    <div key={entry.id} className="relative flex gap-3 pb-5">
+                      {/* timeline spine */}
+                      {idx < auditTrail.length - 1 && (
+                        <div className="absolute left-[13px] top-7 bottom-0 w-px bg-border" />
+                      )}
+                      {/* dot */}
+                      <div className="relative z-10 mt-1 w-7 h-7 rounded-full bg-primary/10 border border-primary/20 flex items-center justify-center shrink-0">
+                        <Clock className="w-3.5 h-3.5 text-primary" />
+                      </div>
+                      {/* content */}
+                      <div className="flex-1 min-w-0 pt-0.5">
+                        <div className="flex items-baseline gap-2 mb-2">
+                          <span className="text-sm font-semibold">{entry.actorName}</span>
+                          <span className="text-xs text-muted-foreground">
+                            {new Date(entry.timestamp).toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric' })}
+                            {' · '}
+                            {new Date(entry.timestamp).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' })}
+                          </span>
+                        </div>
+                        <div className="space-y-1.5">
+                          {entry.changes.map((change, i) => (
+                            <div key={i} className="grid grid-cols-[120px_1fr] items-start gap-2 text-xs">
+                              <span className="text-muted-foreground font-medium truncate pt-0.5">{change.label}</span>
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span className="px-1.5 py-0.5 rounded bg-red-50 text-red-700 line-through">
+                                  {change.previousValue ?? '—'}
+                                </span>
+                                <span className="text-muted-foreground">→</span>
+                                <span className="px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 font-medium">
+                                  {change.newValue ?? '—'}
+                                </span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </TabsContent>
 
           </div>

@@ -55,6 +55,7 @@ export default function RequestLeavePage() {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [document, setDocument] = useState<File | null>(null)
   const [documentPreview, setDocumentPreview] = useState<string>("")
+  const [submittedAsOverride, setSubmittedAsOverride] = useState(false)
 
   const [availableTypes, setAvailableTypes] = useState<LeaveType[]>([])
   const [userBalances, setUserBalances] = useState<LeaveBalance[]>([])
@@ -201,6 +202,7 @@ export default function RequestLeavePage() {
         reason: reason || undefined,
         documentUrl,
         employeeName: `${user.firstName} ${user.lastName}`,
+        isOverride: hasInsufficientBalance,
       })
 
       if (!result.success) {
@@ -209,6 +211,7 @@ export default function RequestLeavePage() {
         return
       }
 
+      setSubmittedAsOverride(hasInsufficientBalance)
       setSuccess(true)
       setIsSubmitting(false)
 
@@ -245,9 +248,13 @@ export default function RequestLeavePage() {
                 <div className="w-16 h-16 bg-emerald-100 rounded-full flex items-center justify-center mx-auto">
                   <CalendarDays className="w-8 h-8 text-emerald-600" />
                 </div>
-                <h2 className="text-2xl font-bold">Leave Request Submitted!</h2>
+                <h2 className="text-2xl font-bold">
+                  {submittedAsOverride ? "Override Request Submitted" : "Leave Request Submitted!"}
+                </h2>
                 <p className="text-muted-foreground">
-                  Your leave request has been submitted successfully and is awaiting manager approval.
+                  {submittedAsOverride
+                    ? "Your request has been submitted. Your balance is insufficient, so it has been flagged for manager review — they will need to authorise the override before it can be approved."
+                    : "Your leave request has been submitted successfully and is awaiting manager approval."}
                 </p>
                 <Button onClick={() => router.push("/dashboard")}>Return to Dashboard</Button>
               </div>

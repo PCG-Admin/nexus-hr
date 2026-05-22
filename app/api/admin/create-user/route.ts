@@ -1,36 +1,25 @@
 import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
-import { createClient as createServerClient } from '@/lib/supabase/server'
+import { getApiUser } from '@/lib/supabase/api-auth'
+import type { NextRequest } from 'next/server'
 
-// Create admin client lazily to avoid build-time errors
 function getSupabaseAdmin() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY
-
-  if (!url || !serviceRoleKey) {
-    throw new Error('Missing Supabase configuration for admin client')
-  }
-
+  if (!url || !serviceRoleKey) throw new Error('Missing Supabase configuration for admin client')
   return createClient(url, serviceRoleKey, {
-    auth: {
-      autoRefreshToken: false,
-      persistSession: false,
-    },
+    auth: { autoRefreshToken: false, persistSession: false },
   })
 }
 
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
   try {
-    // Verify the request is from an authenticated admin
-    const supabase = await createServerClient()
-    const { data: { user: currentUser } } = await supabase.auth.getUser()
+    const currentUser = await getApiUser(request)
+    if (!currentUser) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-    if (!currentUser) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
+    const supabaseAdmin = getSupabaseAdmin()
 
-    // Check if current user is an admin
-    const { data: profile } = await supabase
+    const { data: profile } = await supabaseAdmin
       .from('employees' as any)
       .select('role')
       .eq('id', currentUser.id)
@@ -40,22 +29,23 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Forbidden - Admin access required' }, { status: 403 })
     }
 
-    // Parse request body
     const body = await request.json()
-    const { email, password, firstName, lastName, role, department, employeeNumber } = body
+    const {
+      email, password, firstName, lastName, role,
+      department, employeeNumber, jobTitle, grade, employmentType, hireDate, managerId,
+      phone, personalEmail, address, city, postalCode,
+      emergencyContactName, emergencyContactPhone, emergencyContactRelationship,
+      idNumber, dateOfBirth,
+    } = body
 
-    // Validate required fields
     if (!email || !password || !firstName || !lastName || !role) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 })
     }
 
-    const supabaseAdmin = getSupabaseAdmin()
-
-    // Create auth user
     const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
       email,
       password,
-      email_confirm: true, // Auto-confirm email
+      email_confirm: true,
     })
 
     if (authError) {
@@ -63,7 +53,6 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: authError.message }, { status: 400 })
     }
 
-    // Insert the employee record (directly — no DB trigger)
     const { error: profileError } = await supabaseAdmin
       .from('employees' as any)
       .insert({
@@ -74,7 +63,21 @@ export async function POST(request: Request) {
         role,
         department: department || null,
         employee_number: employeeNumber || null,
-        hire_date: new Date().toISOString().split('T')[0],
+        job_title: jobTitle || null,
+        grade: grade || null,
+        employment_type: employmentType || null,
+        hire_date: hireDate || new Date().toISOString().split('T')[0],
+        manager_id: managerId || null,
+        phone: phone || null,
+        personal_email: personalEmail || null,
+        address: address || null,
+        city: city || null,
+        postal_code: postalCode || null,
+        emergency_contact_name: emergencyContactName || null,
+        emergency_contact_phone: emergencyContactPhone || null,
+        emergency_contact_relationship: emergencyContactRelationship || null,
+        id_number: idNumber || null,
+        date_of_birth: dateOfBirth || null,
         is_active: true,
       })
 
@@ -84,14 +87,10 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: profileError.message }, { status: 400 })
     }
 
-    // Create leave balances for the new user
-    const { data: leaveTypes } = await supabaseAdmin
-      .from('leave_types')
-      .select('id, default_days')
+    const { data: leaveTypes } = await supabaseAdmin.from('leave_types').select('id, default_days')
 
     if (leaveTypes && leaveTypes.length > 0) {
       const currentYear = new Date().getFullYear()
-
       const balances = (leaveTypes as { id: string; default_days: number }[]).map((lt) => ({
         user_id: authData.user.id,
         leave_type_id: lt.id,
@@ -99,11 +98,9 @@ export async function POST(request: Request) {
         used_days: 0,
         year: currentYear,
       }))
-
       await supabaseAdmin.from('leave_balances').insert(balances)
     }
 
-    // Auto-send password setup email via Make (fire-and-forget)
     const makeWebhookUrl = process.env.MAKE_WEBHOOK_URL
     const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000'
     if (makeWebhookUrl) {
@@ -122,21 +119,11 @@ export async function POST(request: Request) {
           })
         }
       } catch (emailErr) {
-        // Non-fatal — user was created, email just didn't send
         console.error('Setup email error (non-fatal):', emailErr)
       }
     }
 
-    return NextResponse.json({
-      success: true,
-      user: {
-        id: authData.user.id,
-        email,
-        firstName,
-        lastName,
-        role,
-      },
-    })
+    return NextResponse.json({ success: true, user: { id: authData.user.id, email, firstName, lastName, role } })
   } catch (err) {
     console.error('Unexpected error:', err)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })

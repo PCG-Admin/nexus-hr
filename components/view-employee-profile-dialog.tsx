@@ -1,5 +1,6 @@
 "use client"
 
+import { useEffect, useState } from "react"
 import {
   Dialog,
   DialogContent,
@@ -8,8 +9,9 @@ import {
 } from "@/components/ui/dialog"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Briefcase, Phone, MapPin, AlertTriangle, Building2, Mail, Calendar, Hash, GraduationCap, BadgeCheck } from "lucide-react"
-import { type Employee } from "@/lib/supabase/leave-service"
+import { Briefcase, Phone, MapPin, AlertTriangle, Building2, Mail, Calendar, Hash, GraduationCap, BadgeCheck, Clock } from "lucide-react"
+import { type Employee, getEmployeeAuditTrail, type EmployeeAuditEntry } from "@/lib/supabase/leave-service"
+import { useAuth } from "@/lib/auth"
 import { format } from "date-fns"
 import { type ElementType } from "react"
 
@@ -54,6 +56,16 @@ type Props = {
 }
 
 export function ViewEmployeeProfileDialog({ employee, isOpen, onClose }: Props) {
+  const { user } = useAuth()
+  const canViewHistory = user?.role === 'hr_manager' || user?.role === 'system_admin'
+  const [auditTrail, setAuditTrail] = useState<EmployeeAuditEntry[]>([])
+
+  useEffect(() => {
+    if (isOpen && employee && canViewHistory) {
+      getEmployeeAuditTrail(employee.id).then(setAuditTrail)
+    }
+  }, [isOpen, employee, canViewHistory])
+
   if (!employee) return null
 
   const initials = `${employee.firstName[0]}${employee.lastName[0]}`.toUpperCase()
@@ -95,6 +107,7 @@ export function ViewEmployeeProfileDialog({ employee, isOpen, onClose }: Props) 
             <TabsTrigger value="employment">Employment</TabsTrigger>
             <TabsTrigger value="contact">Contact</TabsTrigger>
             <TabsTrigger value="emergency">Emergency</TabsTrigger>
+            {canViewHistory && <TabsTrigger value="history">Change History</TabsTrigger>}
           </TabsList>
 
           <div className="overflow-y-auto flex-1 mt-4">
@@ -135,6 +148,54 @@ export function ViewEmployeeProfileDialog({ employee, isOpen, onClose }: Props) 
                 </div>
               )}
             </TabsContent>
+
+            {canViewHistory && (
+              <TabsContent value="history" className="mt-0">
+                {auditTrail.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-10 text-center">
+                    <Clock className="w-8 h-8 text-muted-foreground mb-2" />
+                    <p className="text-sm text-muted-foreground">No change history recorded yet</p>
+                  </div>
+                ) : (
+                  <div className="relative space-y-0">
+                    {auditTrail.map((entry, idx) => (
+                      <div key={entry.id} className="relative flex gap-3 pb-5">
+                        {idx < auditTrail.length - 1 && (
+                          <div className="absolute left-[13px] top-7 bottom-0 w-px bg-border" />
+                        )}
+                        <div className="relative z-10 mt-1 w-7 h-7 rounded-full bg-primary/10 border border-primary/20 flex items-center justify-center shrink-0">
+                          <Clock className="w-3.5 h-3.5 text-primary" />
+                        </div>
+                        <div className="flex-1 min-w-0 pt-0.5">
+                          <div className="flex items-baseline gap-2 mb-2">
+                            <span className="text-sm font-semibold">{entry.actorName}</span>
+                            <span className="text-xs text-muted-foreground">
+                              {format(new Date(entry.timestamp), "d MMM yyyy · HH:mm")}
+                            </span>
+                          </div>
+                          <div className="space-y-1.5">
+                            {entry.changes.map((change, i) => (
+                              <div key={i} className="grid grid-cols-[120px_1fr] items-start gap-2 text-xs">
+                                <span className="text-muted-foreground font-medium truncate pt-0.5">{change.label}</span>
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <span className="px-1.5 py-0.5 rounded bg-red-50 text-red-700 line-through">
+                                    {change.previousValue ?? '—'}
+                                  </span>
+                                  <span className="text-muted-foreground">→</span>
+                                  <span className="px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 font-medium">
+                                    {change.newValue ?? '—'}
+                                  </span>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </TabsContent>
+            )}
 
           </div>
         </Tabs>

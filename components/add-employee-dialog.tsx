@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import {
   Dialog,
   DialogContent,
@@ -24,6 +24,8 @@ import { Alert, AlertDescription } from "@/components/ui/alert"
 import { AlertCircle } from "lucide-react"
 import { type UserRole } from "@/lib/auth"
 import { getOrgConfig } from "@/lib/org-config"
+import { getAllEmployees, type Employee } from "@/lib/supabase/leave-service"
+import { apiFetch } from "@/lib/api-fetch"
 
 type AddEmployeeDialogProps = {
   isOpen: boolean
@@ -43,6 +45,7 @@ const EMPTY = {
   grade: "",
   employeeNumber: "",
   hireDate: "",
+  managerId: "",
   phone: "",
   personalEmail: "",
   address: "",
@@ -60,6 +63,11 @@ export function AddEmployeeDialog({ isOpen, onClose, onSuccess }: AddEmployeeDia
   const [error, setError] = useState("")
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [orgConfig, setOrgConfig] = useState(() => getOrgConfig())
+  const [allEmployees, setAllEmployees] = useState<Employee[]>([])
+
+  useEffect(() => {
+    if (isOpen) getAllEmployees().then(setAllEmployees)
+  }, [isOpen])
 
   const set = (field: keyof typeof EMPTY) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setFormData((prev) => ({ ...prev, [field]: e.target.value }))
@@ -79,9 +87,8 @@ export function AddEmployeeDialog({ isOpen, onClose, onSuccess }: AddEmployeeDia
 
     setIsSubmitting(true)
     try {
-      const response = await fetch("/api/admin/create-user", {
+      const response = await apiFetch("/api/admin/create-user", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           email: formData.email,
           password: formData.password,
@@ -94,6 +101,7 @@ export function AddEmployeeDialog({ isOpen, onClose, onSuccess }: AddEmployeeDia
           grade: formData.grade ? parseInt(formData.grade) : null,
           employeeNumber: formData.employeeNumber || null,
           hireDate: formData.hireDate || null,
+          managerId: formData.managerId || null,
           phone: formData.phone || null,
           personalEmail: formData.personalEmail || null,
           address: formData.address || null,
@@ -255,6 +263,25 @@ export function AddEmployeeDialog({ isOpen, onClose, onSuccess }: AddEmployeeDia
                 {field("employeeNumber", "Employee Number", "text", "EMP001")}
               </div>
               {field("hireDate", "Hire Date", "date")}
+
+              <div className="space-y-1.5">
+                <Label>Reports To (Manager)</Label>
+                <Select
+                  value={formData.managerId || "none"}
+                  onValueChange={(v) => setFormData((p) => ({ ...p, managerId: v === "none" ? "" : v }))}
+                  disabled={isSubmitting}
+                >
+                  <SelectTrigger><SelectValue placeholder="Select manager" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">— No manager —</SelectItem>
+                    {allEmployees.filter(e => e.isActive).map(e => (
+                      <SelectItem key={e.id} value={e.id}>
+                        {e.firstName} {e.lastName} ({e.role.replace('_', ' ')})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
             </TabsContent>
 
             {/* ── Contact tab ────────────────────────────────── */}

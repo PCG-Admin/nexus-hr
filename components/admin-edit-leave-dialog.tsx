@@ -10,6 +10,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { getPublicHolidayDates, countWorkingDays } from "@/lib/supabase/holiday-service"
 import type { LeaveRequestWithEmployee } from "@/lib/supabase/leave-service"
+import { apiFetch } from "@/lib/api-fetch"
 
 type Props = {
   request: LeaveRequestWithEmployee | null
@@ -71,9 +72,8 @@ export function AdminEditLeaveDialog({ request, onClose, onUpdated }: Props) {
     setError("")
 
     try {
-      const res = await fetch("/api/leave/admin-edit", {
+      const res = await apiFetch("/api/leave/admin-edit", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           requestId: request.id,
           endDate,

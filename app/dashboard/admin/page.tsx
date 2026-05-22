@@ -35,6 +35,7 @@ import {
 } from "@/lib/supabase/holiday-service"
 import { DEMO_EMPLOYEES } from "@/lib/demo-data"
 import { getOrgConfig, saveOrgConfig, type OrgConfig } from "@/lib/org-config"
+import { apiFetch } from "@/lib/api-fetch"
 
 export default function AdminDashboardPage() {
   const { user, isLoading } = useAuth()
@@ -208,11 +209,8 @@ export default function AdminDashboardPage() {
 
     setIsDeleting(true)
     try {
-      const response = await fetch("/api/admin/delete-user", {
+      const response = await apiFetch("/api/admin/delete-user", {
         method: "DELETE",
-        headers: {
-          "Content-Type": "application/json",
-        },
         body: JSON.stringify({ userId: deletingEmployee.id }),
       })
 

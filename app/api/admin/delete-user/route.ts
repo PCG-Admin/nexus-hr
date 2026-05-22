@@ -1,36 +1,25 @@
 import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
-import { createClient as createServerClient } from '@/lib/supabase/server'
+import { getApiUser } from '@/lib/supabase/api-auth'
+import type { NextRequest } from 'next/server'
 
-// Create admin client lazily to avoid build-time errors
 function getSupabaseAdmin() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY
-
-  if (!url || !serviceRoleKey) {
-    throw new Error('Missing Supabase configuration for admin client')
-  }
-
+  if (!url || !serviceRoleKey) throw new Error('Missing Supabase configuration for admin client')
   return createClient(url, serviceRoleKey, {
-    auth: {
-      autoRefreshToken: false,
-      persistSession: false,
-    },
+    auth: { autoRefreshToken: false, persistSession: false },
   })
 }
 
-export async function DELETE(request: Request) {
+export async function DELETE(request: NextRequest) {
   try {
-    // Verify the request is from an authenticated admin
-    const supabase = await createServerClient()
-    const { data: { user: currentUser } } = await supabase.auth.getUser()
+    const currentUser = await getApiUser(request)
+    if (!currentUser) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-    if (!currentUser) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
+    const supabaseAdmin = getSupabaseAdmin()
 
-    // Check if current user is an admin
-    const { data: profile } = await supabase
+    const { data: profile } = await supabaseAdmin
       .from('employees' as any)
       .select('role')
       .eq('id', currentUser.id)
@@ -40,42 +29,17 @@ export async function DELETE(request: Request) {
       return NextResponse.json({ error: 'Forbidden - Admin access required' }, { status: 403 })
     }
 
-    // Parse request body
     const body = await request.json()
     const { userId } = body
 
-    if (!userId) {
-      return NextResponse.json({ error: 'Missing userId' }, { status: 400 })
-    }
+    if (!userId) return NextResponse.json({ error: 'Missing userId' }, { status: 400 })
+    if (userId === currentUser.id) return NextResponse.json({ error: 'Cannot delete your own account' }, { status: 400 })
 
-    // Prevent self-deletion
-    if (userId === currentUser.id) {
-      return NextResponse.json({ error: 'Cannot delete your own account' }, { status: 400 })
-    }
+    await supabaseAdmin.from('leave_balances').delete().eq('user_id', userId)
+    await supabaseAdmin.from('leave_requests').delete().eq('user_id', userId)
+    await supabaseAdmin.from('employees' as any).delete().eq('id', userId)
 
-    const supabaseAdmin = getSupabaseAdmin()
-
-    // Delete leave balances
-    await supabaseAdmin
-      .from('leave_balances')
-      .delete()
-      .eq('user_id', userId)
-
-    // Delete leave requests
-    await supabaseAdmin
-      .from('leave_requests')
-      .delete()
-      .eq('user_id', userId)
-
-    // Delete employee record
-    await supabaseAdmin
-      .from('employees' as any)
-      .delete()
-      .eq('id', userId)
-
-    // Delete auth user
     const { error: authError } = await supabaseAdmin.auth.admin.deleteUser(userId)
-
     if (authError) {
       console.error('Error deleting auth user:', authError)
       return NextResponse.json({ error: authError.message }, { status: 400 })

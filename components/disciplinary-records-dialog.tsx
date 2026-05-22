@@ -2,10 +2,6 @@
 
 import { useEffect, useState } from "react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import {
-  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
-  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
-} from "@/components/ui/alert-dialog"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -21,6 +17,7 @@ import {
   DISCIPLINARY_TYPE_LABELS, DISCIPLINARY_TYPE_COLORS,
   getEmployeeDisciplinaryRecords, createDisciplinaryRecord,
   updateDisciplinaryRecord, finaliseDisciplinaryRecord, getRecordAuditTrail,
+  uploadDisciplinaryDocument,
 } from "@/lib/supabase/disciplinary-service"
 import { DEMO_DISCIPLINARY_RECORDS, DEMO_AUDIT_ENTRIES } from "@/lib/demo-data"
 import { useAuth } from "@/lib/auth"
@@ -102,7 +99,12 @@ export function DisciplinaryRecordsDialog({ employee, isOpen, onClose }: Props) 
     })
     setDocFile(null)
     setDocPreview(record.documentUrl ?? "")
-    setError(""); setView("edit")
+    setError("")
+    if (isDb()) getRecordAuditTrail(record.id).then(entries => setAuditEntries(prev => {
+      const without = prev.filter(a => a.recordId !== record.id)
+      return [...without, ...entries]
+    }))
+    setView("edit")
   }
 
   const handleOpenView = (record: DisciplinaryRecord) => {
@@ -132,37 +134,47 @@ export function DisciplinaryRecordsDialog({ employee, isOpen, onClose }: Props) 
     }
     setIsSaving(true); setError("")
 
-    const docUrl = docFile ? docFile.name : null
+    let docUrl: string | null = null
+    if (docFile) {
+      const upload = await uploadDisciplinaryDocument(docFile, employee.id)
+      if (!upload.success) { setError(upload.error ?? "Failed to upload document."); setIsSaving(false); return }
+      docUrl = upload.url ?? null
+    }
+
+    const changes: FieldChange[] = [
+      { field: "type",         label: "Incident Type", previousValue: null, newValue: DISCIPLINARY_TYPE_LABELS[form.type as DisciplinaryType] },
+      { field: "incidentDate", label: "Incident Date", previousValue: null, newValue: form.incidentDate },
+      ...(form.hearingDate   ? [{ field: "hearingDate",  label: "Hearing Date", previousValue: null, newValue: form.hearingDate }] : []),
+      { field: "description", label: "Description",    previousValue: null, newValue: form.description.trim().slice(0, 80) + (form.description.length > 80 ? "…" : "") },
+      ...(form.outcome.trim() ? [{ field: "outcome", label: "Outcome", previousValue: null, newValue: form.outcome.trim().slice(0, 80) + (form.outcome.length > 80 ? "…" : "") }] : []),
+      ...(docUrl ? [{ field: "documentUrl", label: "Supporting Document", previousValue: null, newValue: "Attached" }] : []),
+    ]
+
     const result = await createDisciplinaryRecord({
       employeeId: employee.id, type: form.type as DisciplinaryType,
       incidentDate: form.incidentDate, hearingDate: form.hearingDate || null,
       description: form.description.trim(), outcome: form.outcome.trim() || null,
+      documentUrl: docUrl,
       createdBy: user.id, createdByName: `${user.firstName} ${user.lastName}`,
+      changes,
     })
     if (!result.success) { setError(result.error ?? "Failed to save."); setIsSaving(false); return }
 
-    const newId = `demo-dis-${Date.now()}`
-    const newRecord: DisciplinaryRecord = {
-      id: newId, employeeId: employee.id, type: form.type as DisciplinaryType,
-      incidentDate: form.incidentDate, hearingDate: form.hearingDate || null,
-      description: form.description.trim(), outcome: form.outcome.trim() || null,
-      status: "draft", documentUrl: docUrl,
-      createdBy: user.id, createdByName: `${user.firstName} ${user.lastName}`,
-      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    if (!isDb()) {
+      const newId = result.id ?? `demo-dis-${Date.now()}`
+      const newRecord: DisciplinaryRecord = {
+        id: newId, employeeId: employee.id, type: form.type as DisciplinaryType,
+        incidentDate: form.incidentDate, hearingDate: form.hearingDate || null,
+        description: form.description.trim(), outcome: form.outcome.trim() || null,
+        status: "draft", documentUrl: docUrl,
+        createdBy: user.id, createdByName: `${user.firstName} ${user.lastName}`,
+        createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+      }
+      setRecords(prev => [newRecord, ...prev])
+      pushAudit({ id: makeAuditId(), recordId: newId, action: "created", actorId: user.id, actorName: `${user.firstName} ${user.lastName}`, timestamp: new Date().toISOString(), changes })
+    } else {
+      await loadRecords()
     }
-
-    const changes: FieldChange[] = [
-      { field: "type",         label: "Incident Type",  previousValue: null, newValue: DISCIPLINARY_TYPE_LABELS[form.type as DisciplinaryType] },
-      { field: "incidentDate", label: "Incident Date",  previousValue: null, newValue: form.incidentDate },
-      ...(form.hearingDate  ? [{ field: "hearingDate",  label: "Hearing Date",  previousValue: null, newValue: form.hearingDate }]  : []),
-      { field: "description", label: "Description",    previousValue: null, newValue: form.description.trim().slice(0, 80) + (form.description.length > 80 ? "…" : "") },
-      ...(form.outcome.trim() ? [{ field: "outcome", label: "Outcome", previousValue: null, newValue: form.outcome.trim().slice(0, 80) + (form.outcome.length > 80 ? "…" : "") }] : []),
-      ...(docUrl ? [{ field: "documentUrl", label: "Supporting Document", previousValue: null, newValue: docUrl }] : []),
-    ]
-    pushAudit({ id: makeAuditId(), recordId: newId, action: "created", actorId: user.id, actorName: `${user.firstName} ${user.lastName}`, timestamp: new Date().toISOString(), changes })
-
-    if (!isDb()) setRecords(prev => [newRecord, ...prev])
-    else await loadRecords()
 
     setIsSaving(false); setView("list")
   }
@@ -175,16 +187,16 @@ export function DisciplinaryRecordsDialog({ employee, isOpen, onClose }: Props) 
     }
     setIsSaving(true); setError("")
 
-    const docUrl = docFile ? docFile.name : (docPreview || activeRecord.documentUrl)
+    let docUrl: string | null = activeRecord.documentUrl
+    if (docFile) {
+      const upload = await uploadDisciplinaryDocument(docFile, employee!.id)
+      if (!upload.success) { setError(upload.error ?? "Failed to upload document."); setIsSaving(false); return }
+      docUrl = upload.url ?? null
+    } else if (!docPreview) {
+      docUrl = null
+    }
 
-    const result = await updateDisciplinaryRecord(activeRecord.id, {
-      type: form.type as DisciplinaryType, incidentDate: form.incidentDate,
-      hearingDate: form.hearingDate || null, description: form.description.trim(),
-      outcome: form.outcome.trim() || null,
-    })
-    if (!result.success) { setError(result.error ?? "Failed to update."); setIsSaving(false); return }
-
-    // Build field-level diff
+    // Build field-level diff before saving
     const changes: FieldChange[] = []
     if (form.type !== activeRecord.type)
       changes.push({ field: "type", label: "Incident Type", previousValue: DISCIPLINARY_TYPE_LABELS[activeRecord.type], newValue: DISCIPLINARY_TYPE_LABELS[form.type as DisciplinaryType] })
@@ -197,9 +209,16 @@ export function DisciplinaryRecordsDialog({ employee, isOpen, onClose }: Props) 
     if ((form.outcome.trim() || null) !== activeRecord.outcome)
       changes.push({ field: "outcome", label: "Outcome", previousValue: activeRecord.outcome ? activeRecord.outcome.slice(0, 60) + "…" : null, newValue: form.outcome.trim() ? form.outcome.trim().slice(0, 60) + "…" : null })
     if (docUrl !== activeRecord.documentUrl)
-      changes.push({ field: "documentUrl", label: "Supporting Document", previousValue: activeRecord.documentUrl, newValue: docUrl })
+      changes.push({ field: "documentUrl", label: "Supporting Document", previousValue: activeRecord.documentUrl ? "Previous document" : null, newValue: docUrl ? "New document attached" : null })
 
-    if (changes.length > 0)
+    const result = await updateDisciplinaryRecord(
+      activeRecord.id,
+      { type: form.type as DisciplinaryType, incidentDate: form.incidentDate, hearingDate: form.hearingDate || null, description: form.description.trim(), outcome: form.outcome.trim() || null, documentUrl: docUrl },
+      { actorId: user.id, actorName: `${user.firstName} ${user.lastName}`, changes }
+    )
+    if (!result.success) { setError(result.error ?? "Failed to update."); setIsSaving(false); return }
+
+    if (!isDb() && changes.length > 0)
       pushAudit({ id: makeAuditId(), recordId: activeRecord.id, action: "edited", actorId: user.id, actorName: `${user.firstName} ${user.lastName}`, timestamp: new Date().toISOString(), changes })
 
     if (!isDb()) {
@@ -214,10 +233,13 @@ export function DisciplinaryRecordsDialog({ employee, isOpen, onClose }: Props) 
   // ── finalise ──
   const handleFinalise = async () => {
     if (!finaliseTarget || !user) return
-    const result = await finaliseDisciplinaryRecord(finaliseTarget.id)
+    const result = await finaliseDisciplinaryRecord(finaliseTarget.id, {
+      actorId: user.id, actorName: `${user.firstName} ${user.lastName}`,
+    })
     if (!result.success) { setError(result.error ?? "Failed to finalise."); setFinaliseTarget(null); return }
 
-    pushAudit({ id: makeAuditId(), recordId: finaliseTarget.id, action: "finalised", actorId: user.id, actorName: `${user.firstName} ${user.lastName}`, timestamp: new Date().toISOString(), changes: [{ field: "status", label: "Status", previousValue: "Draft", newValue: "Finalised" }] })
+    if (!isDb())
+      pushAudit({ id: makeAuditId(), recordId: finaliseTarget.id, action: "finalised", actorId: user.id, actorName: `${user.firstName} ${user.lastName}`, timestamp: new Date().toISOString(), changes: [{ field: "status", label: "Status", previousValue: "Draft", newValue: "Finalised" }] })
 
     if (!isDb()) setRecords(prev => prev.map(r => r.id === finaliseTarget.id ? { ...r, status: "finalised" as const } : r))
     else await loadRecords()
@@ -259,7 +281,28 @@ export function DisciplinaryRecordsDialog({ employee, isOpen, onClose }: Props) 
             {/* ── LIST ── */}
             {view === "list" && (
               <div className="space-y-3 pt-1">
-                {canEdit && (
+
+                {/* Inline finalise confirmation — avoids nested dialog portal issues */}
+                {finaliseTarget && (
+                  <div className="rounded-lg border border-red-200 bg-red-50 p-4 space-y-3">
+                    <div className="flex items-center gap-2">
+                      <Lock className="w-4 h-4 text-red-600 shrink-0" />
+                      <p className="text-sm font-semibold text-red-900">Finalise this record?</p>
+                    </div>
+                    <div className="text-xs text-red-800 bg-red-100 rounded-md px-3 py-2">
+                      <strong>{DISCIPLINARY_TYPE_LABELS[finaliseTarget.type]}</strong> — {format(new Date(finaliseTarget.incidentDate), "d MMM yyyy")}
+                    </div>
+                    <p className="text-xs text-red-700">Once finalised this record <strong>cannot be edited or deleted</strong>. This is a permanent legal record.</p>
+                    <div className="flex gap-2">
+                      <Button size="sm" className="bg-red-600 hover:bg-red-700 text-white" onClick={handleFinalise} disabled={isSaving}>
+                        <Lock className="w-3.5 h-3.5 mr-1.5" />{isSaving ? "Finalising..." : "Finalise (Permanent)"}
+                      </Button>
+                      <Button size="sm" variant="outline" onClick={() => setFinaliseTarget(null)} disabled={isSaving}>Cancel</Button>
+                    </div>
+                  </div>
+                )}
+
+                {canEdit && !finaliseTarget && (
                   <Button size="sm" onClick={handleOpenAdd} className="w-full">
                     <Plus className="w-4 h-4 mr-2" />Add New Record
                   </Button>
@@ -371,13 +414,52 @@ export function DisciplinaryRecordsDialog({ employee, isOpen, onClose }: Props) 
                   ) : (
                     <div className="flex items-center gap-3 p-3 border rounded-lg bg-muted/50">
                       <FileText className="w-7 h-7 text-primary shrink-0" />
-                      <p className="text-sm font-medium flex-1 truncate">{docPreview}</p>
+                      <p className="text-sm font-medium flex-1 truncate">
+                        {docFile ? docFile.name : "Existing document"}
+                      </p>
                       <Button type="button" variant="ghost" size="sm" onClick={() => { setDocFile(null); setDocPreview("") }}>
                         <X className="w-4 h-4" />
                       </Button>
                     </div>
                   )}
                 </div>
+
+                {/* Audit trail visible on edit so HR can review history before finalising */}
+                {view === "edit" && activeRecord && recordAudit(activeRecord.id).length > 0 && (
+                  <div className="space-y-2 border-t pt-3">
+                    <div className="flex items-center gap-2">
+                      <Clock className="w-3.5 h-3.5 text-muted-foreground" />
+                      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Change History</p>
+                    </div>
+                    <div className="space-y-2">
+                      {recordAudit(activeRecord.id).map(entry => (
+                        <div key={entry.id} className="border-l-2 border-muted pl-3 space-y-1">
+                          <div className="flex items-center gap-2">
+                            <Badge variant="outline" className={`text-xs ${
+                              entry.action === "created"   ? "bg-blue-50 text-blue-700 border-blue-300" :
+                              entry.action === "finalised" ? "bg-slate-100 text-slate-700 border-slate-300" :
+                              "bg-amber-50 text-amber-700 border-amber-300"
+                            }`}>
+                              {entry.action === "created" ? "Created" : entry.action === "finalised" ? "Finalised" : "Edited"}
+                            </Badge>
+                            <p className="text-xs text-muted-foreground">
+                              {entry.actorName} · {format(new Date(entry.timestamp), "d MMM yyyy 'at' HH:mm")}
+                            </p>
+                          </div>
+                          {entry.changes.filter(c => c.field !== "status").map((change, i) => (
+                            <div key={i} className="text-xs text-muted-foreground pl-1">
+                              <span className="font-medium text-foreground">{change.label}:</span>{" "}
+                              {change.previousValue
+                                ? <><span className="line-through opacity-60">{change.previousValue}</span> → {change.newValue}</>
+                                : <span>{change.newValue}</span>
+                              }
+                            </div>
+                          ))}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
                 <div className="flex gap-3 pt-2">
                   <Button className="flex-1" onClick={view === "add" ? handleSaveNew : handleSaveEdit} disabled={isSaving}>
@@ -430,10 +512,15 @@ export function DisciplinaryRecordsDialog({ employee, isOpen, onClose }: Props) 
                   {activeRecord.documentUrl && (
                     <div>
                       <p className="text-xs text-muted-foreground mb-1">Supporting Document</p>
-                      <div className="flex items-center gap-2 p-3 border rounded-lg bg-muted/40">
+                      <a
+                        href={activeRecord.documentUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-2 p-3 border rounded-lg bg-muted/40 hover:bg-muted transition-colors"
+                      >
                         <FileText className="w-5 h-5 text-primary shrink-0" />
-                        <p className="text-sm font-medium truncate">{activeRecord.documentUrl}</p>
-                      </div>
+                        <p className="text-sm font-medium truncate text-primary underline underline-offset-2">View Document</p>
+                      </a>
                     </div>
                   )}
                 </div>
@@ -486,33 +573,8 @@ export function DisciplinaryRecordsDialog({ employee, isOpen, onClose }: Props) 
             )}
           </div>
         </DialogContent>
-      </Dialog>
 
-      {/* Finalise Confirmation */}
-      <AlertDialog open={!!finaliseTarget} onOpenChange={() => setFinaliseTarget(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle className="flex items-center gap-2">
-              <Lock className="w-5 h-5 text-red-600" />Finalise This Record?
-            </AlertDialogTitle>
-            <AlertDialogDescription className="space-y-2">
-              <span className="block">Once finalised, this record <strong>cannot be edited or deleted</strong>. This is a permanent legal record.</span>
-              {finaliseTarget && (
-                <span className="block p-3 bg-muted rounded-md text-sm text-foreground">
-                  <strong>{DISCIPLINARY_TYPE_LABELS[finaliseTarget.type]}</strong> — {format(new Date(finaliseTarget.incidentDate), "d MMM yyyy")}
-                </span>
-              )}
-              <span className="block">Are you sure you want to proceed?</span>
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={handleFinalise} className="bg-red-600 hover:bg-red-700 text-white">
-              <Lock className="w-4 h-4 mr-2" />Finalise Record (Permanent)
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      </Dialog>
     </>
   )
 }

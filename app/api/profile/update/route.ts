@@ -1,24 +1,26 @@
+import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
-import type { Database } from '@/lib/supabase/types'
+import { getApiUser } from '@/lib/supabase/api-auth'
+import type { NextRequest } from 'next/server'
 
-type EmployeeUpdate = Database['public']['Tables']['employees']['Update']
+function getSupabaseAdmin() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY
+  if (!url || !serviceRoleKey) throw new Error('Missing Supabase configuration')
+  return createClient(url, serviceRoleKey, {
+    auth: { autoRefreshToken: false, persistSession: false },
+  })
+}
 
-export async function PATCH(request: Request) {
+export async function PATCH(request: NextRequest) {
   try {
-    const supabase = await createClient()
-    const { data: { user } } = await supabase.auth.getUser()
-
-    if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
+    const currentUser = await getApiUser(request)
+    if (!currentUser) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
     const body = await request.json()
+    const supabaseAdmin = getSupabaseAdmin()
 
-    // Map camelCase from the client to snake_case DB columns — only contact/personal fields
-    const update: EmployeeUpdate = {
-      updated_at: new Date().toISOString(),
-    }
+    const update: Record<string, unknown> = { updated_at: new Date().toISOString() }
     if ('phone'                        in body) update.phone                          = body.phone                        ?? null
     if ('personalEmail'                in body) update.personal_email                 = body.personalEmail                ?? null
     if ('address'                      in body) update.address                        = body.address                      ?? null
@@ -28,10 +30,10 @@ export async function PATCH(request: Request) {
     if ('emergencyContactPhone'        in body) update.emergency_contact_phone        = body.emergencyContactPhone        ?? null
     if ('emergencyContactRelationship' in body) update.emergency_contact_relationship = body.emergencyContactRelationship ?? null
 
-    const { error } = await supabase
+    const { error } = await supabaseAdmin
       .from('employees')
       .update(update)
-      .eq('id', user.id)
+      .eq('id', currentUser.id)
 
     if (error) {
       console.error('Error updating profile:', error)

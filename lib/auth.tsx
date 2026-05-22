@@ -104,40 +104,53 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const supabase = createClient()
+    let mounted = true
 
-    // Restore session on mount
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
-      if (session?.user) {
-        const employee = await fetchEmployee(session.user.id)
-        if (employee) {
-          setUser(employee)
-          setRoleCookie(employee.role)
+    async function init() {
+      try {
+        const { data: { session } } = await supabase.auth.getSession()
+        if (!mounted) return
+        if (session?.user) {
+          const employee = await fetchEmployee(session.user.id)
+          if (mounted && employee) {
+            setUser(employee)
+            setRoleCookie(employee.role)
+          }
         }
+      } catch {
+        // any error — leave user null, redirect to login will follow
+      } finally {
+        if (mounted) setIsLoading(false)
       }
-      setIsLoading(false)
-    })
+    }
+
+    init()
 
     // Keep session in sync across tabs
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (!mounted) return
       if (event === "SIGNED_IN" && session?.user) {
         const employee = await fetchEmployee(session.user.id)
-        if (employee) {
+        if (mounted && employee) {
           setUser(employee)
           setRoleCookie(employee.role)
         }
       } else if (event === "SIGNED_OUT") {
         setUser(null)
         clearRoleCookie()
-      } else if (event === "TOKEN_REFRESHED" && session?.user && !user) {
+      } else if (event === "TOKEN_REFRESHED" && session?.user) {
         const employee = await fetchEmployee(session.user.id)
-        if (employee) {
+        if (mounted && employee) {
           setUser(employee)
           setRoleCookie(employee.role)
         }
       }
     })
 
-    return () => subscription.unsubscribe()
+    return () => {
+      mounted = false
+      subscription.unsubscribe()
+    }
   }, [fetchEmployee]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const login = async (email: string, password: string): Promise<{ success: boolean; error?: string }> => {

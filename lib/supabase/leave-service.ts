@@ -147,6 +147,7 @@ export async function getLeaveRequests(userId: string): Promise<LeaveRequest[]> 
     daysRequested: row.days_requested,
     reason: row.reason,
     status: row.status,
+    isOverride: row.is_override ?? false,
     reviewerId: row.reviewer_id,
     reviewerNotes: row.reviewer_notes,
     reviewedAt: row.reviewed_at,
@@ -169,6 +170,7 @@ export async function submitLeaveRequest(request: {
   reason?: string
   documentUrl?: string
   employeeName?: string
+  isOverride?: boolean
 }): Promise<{ success: boolean; error?: string; data?: LeaveRequest }> {
   if (!isDbConfigured()) return { success: true }
   const supabase = createClient()
@@ -186,6 +188,7 @@ export async function submitLeaveRequest(request: {
     reason: request.reason || null,
     document_url: request.documentUrl || null,
     status: initialStatus,
+    is_override: request.isOverride ?? false,
   }
 
   const { data, error } = await supabase
@@ -218,7 +221,9 @@ export async function submitLeaveRequest(request: {
       endDate: row.end_date,
       daysRequested: row.days_requested,
       targetRoles: isElevatedRole ? ['hr_manager', 'system_admin'] : ['hr_manager', 'system_admin', 'line_manager'],
-      title: isElevatedRole ? 'Leave Request Awaiting Your Approval' : 'New Leave Request',
+      title: request.isOverride
+        ? 'Leave Request — Balance Override Required'
+        : isElevatedRole ? 'Leave Request Awaiting Your Approval' : 'New Leave Request',
     }),
   }).catch(err => console.error('Failed to send notifications:', err))
 
@@ -234,6 +239,7 @@ export async function submitLeaveRequest(request: {
       daysRequested: row.days_requested,
       reason: row.reason,
       status: row.status,
+      isOverride: row.is_override ?? false,
       reviewerId: row.reviewer_id,
       reviewerNotes: row.reviewer_notes,
       reviewedAt: row.reviewed_at,
@@ -306,104 +312,89 @@ export async function getAllLeaveRequests(): Promise<LeaveRequestWithEmployee[]>
   if (!isDbConfigured()) return []
   const supabase = createClient()
 
-  const { data, error } = await supabase
-    .from('leave_requests')
-    .select(`
-      *,
-      leave_types (
-        name
-      ),
-      employees!leave_requests_user_id_fkey (
-        id,
-        email,
-        first_name,
-        last_name,
-        employee_number,
-        department,
-        role,
-        grade,
-        job_title,
-        employment_type,
-        hire_date,
-        manager_id,
-        phone,
-        personal_email,
-        address,
-        city,
-        postal_code,
-        emergency_contact_name,
-        emergency_contact_phone,
-        emergency_contact_relationship,
-        id_number,
-        date_of_birth,
-        is_active
-      )
-    `)
-    .order('created_at', { ascending: false })
+  // Two-step: fetch requests + leave types, then fetch employees separately
+  // Avoids FK join hint issues (PostgREST FK name can differ from migration)
+  const [requestsResult, employeesResult] = await Promise.all([
+    supabase
+      .from('leave_requests')
+      .select('*, leave_types(name)')
+      .order('created_at', { ascending: false }),
+    supabase
+      .from('employees')
+      .select('id, email, first_name, last_name, employee_number, department, role, grade, job_title, employment_type, hire_date, manager_id, phone, personal_email, address, city, postal_code, emergency_contact_name, emergency_contact_phone, emergency_contact_relationship, id_number, date_of_birth, is_active'),
+  ])
 
-  if (error) return []
+  if (requestsResult.error || !requestsResult.data) return []
 
-  type RequestWithEmployee = LeaveRequestRow & {
-    leave_types: { name: string }
-    employees: {
-      id: string; email: string; first_name: string; last_name: string
-      employee_number: string | null; department: string | null; role: UserRole
-      grade: number | null; job_title: string | null
-      employment_type: 'permanent' | 'fixed_term' | 'probation' | null
-      hire_date: string | null; manager_id: string | null; phone: string | null
-      personal_email: string | null; address: string | null; city: string | null
-      postal_code: string | null; emergency_contact_name: string | null
-      emergency_contact_phone: string | null; emergency_contact_relationship: string | null
-      id_number: string | null; date_of_birth: string | null; is_active: boolean
-    }
+  type EmpRow = {
+    id: string; email: string; first_name: string; last_name: string
+    employee_number: string | null; department: string | null; role: UserRole
+    grade: number | null; job_title: string | null
+    employment_type: 'permanent' | 'fixed_term' | 'probation' | null
+    hire_date: string | null; manager_id: string | null; phone: string | null
+    personal_email: string | null; address: string | null; city: string | null
+    postal_code: string | null; emergency_contact_name: string | null
+    emergency_contact_phone: string | null; emergency_contact_relationship: string | null
+    id_number: string | null; date_of_birth: string | null; is_active: boolean
   }
 
-  return (data as unknown as RequestWithEmployee[])
-    .filter(row => row.employees !== null)
-    .map(row => ({
-      id: row.id,
-      userId: row.user_id,
-      leaveTypeId: row.leave_type_id,
-      leaveTypeName: row.leave_types?.name || 'Unknown',
-      startDate: row.start_date,
-      endDate: row.end_date,
-      daysRequested: row.days_requested,
-      reason: row.reason,
-      status: row.status,
-      reviewerId: row.reviewer_id,
-      reviewerNotes: row.reviewer_notes,
-      reviewedAt: row.reviewed_at,
-      managerReviewerId: row.manager_reviewer_id,
-      managerReviewedAt: row.manager_reviewed_at,
-      documentUrl: row.document_url,
-      createdAt: row.created_at,
-      updatedAt: row.updated_at,
-      employee: {
-        id: row.employees.id,
-        email: row.employees.email,
-        firstName: row.employees.first_name,
-        lastName: row.employees.last_name,
-        employeeNumber: row.employees.employee_number,
-        department: row.employees.department,
-        role: row.employees.role,
-        grade: row.employees.grade,
-        jobTitle: row.employees.job_title,
-        employmentType: row.employees.employment_type,
-        hireDate: row.employees.hire_date,
-        managerId: row.employees.manager_id,
-        phone: row.employees.phone,
-        personalEmail: row.employees.personal_email,
-        address: row.employees.address,
-        city: row.employees.city,
-        postalCode: row.employees.postal_code,
-        emergencyContactName: row.employees.emergency_contact_name,
-        emergencyContactPhone: row.employees.emergency_contact_phone,
-        emergencyContactRelationship: row.employees.emergency_contact_relationship,
-        idNumber: row.employees.id_number,
-        dateOfBirth: row.employees.date_of_birth,
-        isActive: row.employees.is_active,
-      },
-    }))
+  const empMap = new Map<string, EmpRow>(
+    ((employeesResult.data ?? []) as unknown as EmpRow[]).map(e => [e.id, e])
+  )
+
+  type ReqRow = LeaveRequestRow & { leave_types: { name: string } | null }
+
+  return (requestsResult.data as unknown as ReqRow[])
+    .map(row => {
+      const emp = empMap.get(row.user_id)
+      if (!emp) return null
+      return {
+        id: row.id,
+        userId: row.user_id,
+        leaveTypeId: row.leave_type_id,
+        leaveTypeName: row.leave_types?.name || 'Unknown',
+        startDate: row.start_date,
+        endDate: row.end_date,
+        daysRequested: row.days_requested,
+        reason: row.reason,
+        status: row.status,
+        isOverride: row.is_override ?? false,
+        reviewerId: row.reviewer_id,
+        reviewerNotes: row.reviewer_notes,
+        reviewedAt: row.reviewed_at,
+        managerReviewerId: row.manager_reviewer_id,
+        managerReviewedAt: row.manager_reviewed_at,
+        documentUrl: row.document_url,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+        employee: {
+          id: emp.id,
+          email: emp.email,
+          firstName: emp.first_name,
+          lastName: emp.last_name,
+          employeeNumber: emp.employee_number,
+          department: emp.department,
+          role: emp.role,
+          grade: emp.grade,
+          jobTitle: emp.job_title,
+          employmentType: emp.employment_type,
+          hireDate: emp.hire_date,
+          managerId: emp.manager_id,
+          phone: emp.phone,
+          personalEmail: emp.personal_email,
+          address: emp.address,
+          city: emp.city,
+          postalCode: emp.postal_code,
+          emergencyContactName: emp.emergency_contact_name,
+          emergencyContactPhone: emp.emergency_contact_phone,
+          emergencyContactRelationship: emp.emergency_contact_relationship,
+          idNumber: emp.id_number,
+          dateOfBirth: emp.date_of_birth,
+          isActive: emp.is_active,
+        },
+      }
+    })
+    .filter((r): r is LeaveRequestWithEmployee => r !== null)
 }
 
 // Manager stage-1 approval — moves request to pending_ceo and notifies HR/admin
@@ -558,96 +549,79 @@ export async function getAllLeaveBalances(year?: number): Promise<LeaveBalanceWi
   const supabase = createClient()
   const currentYear = year || new Date().getFullYear()
 
-  const { data, error } = await supabase
-    .from('leave_balances')
-    .select(`
-      *,
-      leave_types (
-        name,
-        color
-      ),
-      employees!leave_balances_user_id_fkey (
-        id,
-        email,
-        first_name,
-        last_name,
-        employee_number,
-        department,
-        role,
-        grade,
-        job_title,
-        employment_type,
-        hire_date,
-        manager_id,
-        phone,
-        personal_email,
-        address,
-        city,
-        postal_code,
-        emergency_contact_name,
-        emergency_contact_phone,
-        emergency_contact_relationship,
-        id_number,
-        date_of_birth,
-        is_active
-      )
-    `)
-    .eq('year', currentYear)
-    .order('created_at', { ascending: false })
+  const [balancesResult, employeesResult] = await Promise.all([
+    supabase
+      .from('leave_balances')
+      .select('*, leave_types(name, color)')
+      .eq('year', currentYear)
+      .order('created_at', { ascending: false }),
+    supabase
+      .from('employees')
+      .select('id, email, first_name, last_name, employee_number, department, role, grade, job_title, employment_type, hire_date, manager_id, phone, personal_email, address, city, postal_code, emergency_contact_name, emergency_contact_phone, emergency_contact_relationship, id_number, date_of_birth, is_active'),
+  ])
 
-  if (error) return []
+  if (balancesResult.error || !balancesResult.data) return []
 
-  type BalanceWithEmployee = LeaveBalanceRow & {
-    leave_types: { name: string; color: string | null }
-    employees: {
-      id: string; email: string; first_name: string; last_name: string
-      employee_number: string | null; department: string | null; role: UserRole
-      grade: number | null; job_title: string | null
-      employment_type: 'permanent' | 'fixed_term' | 'probation' | null
-      hire_date: string | null; manager_id: string | null; phone: string | null
-      personal_email: string | null; address: string | null; city: string | null
-      postal_code: string | null; emergency_contact_name: string | null
-      emergency_contact_phone: string | null; emergency_contact_relationship: string | null
-      id_number: string | null; date_of_birth: string | null; is_active: boolean
-    }
+  type EmpRow = {
+    id: string; email: string; first_name: string; last_name: string
+    employee_number: string | null; department: string | null; role: UserRole
+    grade: number | null; job_title: string | null
+    employment_type: 'permanent' | 'fixed_term' | 'probation' | null
+    hire_date: string | null; manager_id: string | null; phone: string | null
+    personal_email: string | null; address: string | null; city: string | null
+    postal_code: string | null; emergency_contact_name: string | null
+    emergency_contact_phone: string | null; emergency_contact_relationship: string | null
+    id_number: string | null; date_of_birth: string | null; is_active: boolean
   }
 
-  return (data as unknown as BalanceWithEmployee[]).map(row => ({
-    id: row.id,
-    userId: row.user_id,
-    leaveTypeId: row.leave_type_id,
-    leaveTypeName: row.leave_types?.name || 'Unknown',
-    totalDays: row.total_days,
-    usedDays: row.used_days,
-    availableDays: row.total_days - row.used_days,
-    year: row.year,
-    color: row.leave_types?.color || null,
-    employee: {
-      id: row.employees.id,
-      email: row.employees.email,
-      firstName: row.employees.first_name,
-      lastName: row.employees.last_name,
-      employeeNumber: row.employees.employee_number,
-      department: row.employees.department,
-      role: row.employees.role,
-      grade: row.employees.grade,
-      jobTitle: row.employees.job_title,
-      employmentType: row.employees.employment_type,
-      hireDate: row.employees.hire_date,
-      managerId: row.employees.manager_id,
-      phone: row.employees.phone,
-      personalEmail: row.employees.personal_email,
-      address: row.employees.address,
-      city: row.employees.city,
-      postalCode: row.employees.postal_code,
-      emergencyContactName: row.employees.emergency_contact_name,
-      emergencyContactPhone: row.employees.emergency_contact_phone,
-      emergencyContactRelationship: row.employees.emergency_contact_relationship,
-      idNumber: row.employees.id_number,
-      dateOfBirth: row.employees.date_of_birth,
-      isActive: row.employees.is_active,
-    },
-  }))
+  const empMap = new Map<string, EmpRow>(
+    ((employeesResult.data ?? []) as unknown as EmpRow[]).map(e => [e.id, e])
+  )
+
+  type BalRow = LeaveBalanceRow & { leave_types: { name: string; color: string | null } | null }
+
+  return (balancesResult.data as unknown as BalRow[])
+    .map(row => {
+      const emp = empMap.get(row.user_id)
+      if (!emp) return null
+      return {
+        id: row.id,
+        userId: row.user_id,
+        leaveTypeId: row.leave_type_id,
+        leaveTypeName: row.leave_types?.name || 'Unknown',
+        totalDays: row.total_days,
+        usedDays: row.used_days,
+        availableDays: row.total_days - row.used_days,
+        year: row.year,
+        color: row.leave_types?.color || null,
+        employee: {
+          id: emp.id,
+          email: emp.email,
+          firstName: emp.first_name,
+          lastName: emp.last_name,
+          employeeNumber: emp.employee_number,
+          department: emp.department,
+          role: emp.role,
+          grade: emp.grade,
+          jobTitle: emp.job_title,
+          employmentType: emp.employment_type,
+          hireDate: emp.hire_date,
+          managerId: emp.manager_id,
+          phone: emp.phone,
+          personalEmail: emp.personal_email,
+          address: emp.address,
+          city: emp.city,
+          postalCode: emp.postal_code,
+          emergencyContactName: emp.emergency_contact_name,
+          emergencyContactPhone: emp.emergency_contact_phone,
+          emergencyContactRelationship: emp.emergency_contact_relationship,
+          idNumber: emp.id_number,
+          dateOfBirth: emp.date_of_birth,
+          isActive: emp.is_active,
+        },
+      }
+    })
+    .filter((r): r is LeaveBalanceWithEmployee => r !== null)
 }
 
 // Update a pending leave request (employee only)
@@ -746,6 +720,11 @@ export async function updateEmployee(
     emergencyContactRelationship: string | null
     idNumber: string | null
     dateOfBirth: string | null
+  },
+  audit?: {
+    actorId: string
+    actorName: string
+    changes: EmployeeFieldChange[]
   }
 ): Promise<{ success: boolean; error?: string }> {
   if (!isDbConfigured()) return { success: true }
@@ -783,7 +762,53 @@ export async function updateEmployee(
     return { success: false, error: error.message }
   }
 
+  if (audit && audit.changes.length > 0) {
+    await (supabase as any).from('employee_audit').insert({
+      employee_id: employeeId,
+      actor_id:    audit.actorId,
+      actor_name:  audit.actorName,
+      changes:     audit.changes,
+    })
+  }
+
   return { success: true }
+}
+
+// ── Employee audit trail ──────────────────────────────────
+
+export type EmployeeFieldChange = {
+  field: string
+  label: string
+  previousValue: string | null
+  newValue: string | null
+}
+
+export type EmployeeAuditEntry = {
+  id: string
+  employeeId: string
+  actorId: string
+  actorName: string
+  timestamp: string
+  changes: EmployeeFieldChange[]
+}
+
+export async function getEmployeeAuditTrail(employeeId: string): Promise<EmployeeAuditEntry[]> {
+  if (!isDbConfigured()) return []
+  const supabase = createClient()
+  const { data, error } = await (supabase as any)
+    .from('employee_audit')
+    .select('*')
+    .eq('employee_id', employeeId)
+    .order('timestamp', { ascending: false })
+  if (error || !data) return []
+  return (data as any[]).map(row => ({
+    id:         row.id,
+    employeeId: row.employee_id,
+    actorId:    row.actor_id,
+    actorName:  row.actor_name,
+    timestamp:  row.timestamp,
+    changes:    row.changes ?? [],
+  }))
 }
 
 // Delete an employee (admin only — hard delete; use deactivate for soft delete)

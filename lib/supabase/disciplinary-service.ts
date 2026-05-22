@@ -27,11 +27,11 @@ export type DisciplinaryRecord = {
 }
 
 export const DISCIPLINARY_TYPE_LABELS: Record<DisciplinaryType, string> = {
-  verbal_warning:       'Verbal Warning',
-  written_warning:      'Written Warning',
-  final_written_warning:'Final Written Warning',
-  suspension:           'Suspension',
-  dismissal:            'Dismissal',
+  verbal_warning:        'Verbal Warning',
+  written_warning:       'Written Warning',
+  final_written_warning: 'Final Written Warning',
+  suspension:            'Suspension',
+  dismissal:             'Dismissal',
 }
 
 export const DISCIPLINARY_TYPE_COLORS: Record<DisciplinaryType, string> = {
@@ -59,6 +59,27 @@ export type AuditEntry = {
   changes: FieldChange[]
 }
 
+// ── private helper ────────────────────────────────────────────
+async function writeAuditEntry(entry: {
+  recordId: string
+  action: AuditEntry['action']
+  actorId: string
+  actorName: string
+  changes: FieldChange[]
+}): Promise<void> {
+  if (!isDbConfigured()) return
+  const supabase = createClient()
+  await (supabase as any).from('disciplinary_audit').insert({
+    record_id:  entry.recordId,
+    action:     entry.action,
+    actor_id:   entry.actorId,
+    actor_name: entry.actorName,
+    changes:    entry.changes,
+  })
+}
+
+// ── public API ────────────────────────────────────────────────
+
 export async function getRecordAuditTrail(recordId: string): Promise<AuditEntry[]> {
   if (!isDbConfigured()) return []
   const supabase = createClient()
@@ -69,13 +90,13 @@ export async function getRecordAuditTrail(recordId: string): Promise<AuditEntry[
     .order('timestamp', { ascending: true })
   if (error || !data) return []
   return (data as any[]).map(row => ({
-    id: row.id,
-    recordId: row.record_id,
-    action: row.action as AuditEntry['action'],
-    actorId: row.actor_id,
+    id:        row.id,
+    recordId:  row.record_id,
+    action:    row.action as AuditEntry['action'],
+    actorId:   row.actor_id,
     actorName: row.actor_name,
     timestamp: row.timestamp,
-    changes: row.changes ?? [],
+    changes:   row.changes ?? [],
   }))
 }
 
@@ -89,20 +110,33 @@ export async function getEmployeeDisciplinaryRecords(employeeId: string): Promis
     .order('incident_date', { ascending: false })
   if (error || !data) return []
   return (data as any[]).map(row => ({
-    id: row.id,
-    employeeId: row.employee_id,
-    type: row.type as DisciplinaryType,
-    incidentDate: row.incident_date,
-    hearingDate: row.hearing_date ?? null,
-    description: row.description,
-    outcome: row.outcome ?? null,
-    status: row.status as 'draft' | 'finalised',
-    documentUrl: row.document_url ?? null,
-    createdBy: row.created_by,
+    id:            row.id,
+    employeeId:    row.employee_id,
+    type:          row.type as DisciplinaryType,
+    incidentDate:  row.incident_date,
+    hearingDate:   row.hearing_date ?? null,
+    description:   row.description,
+    outcome:       row.outcome ?? null,
+    status:        row.status as 'draft' | 'finalised',
+    documentUrl:   row.document_url ?? null,
+    createdBy:     row.created_by,
     createdByName: row.created_by_name,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
+    createdAt:     row.created_at,
+    updatedAt:     row.updated_at,
   }))
+}
+
+export async function uploadDisciplinaryDocument(
+  file: File,
+  employeeId: string
+): Promise<{ success: boolean; url?: string; error?: string }> {
+  const supabase = createClient()
+  const ext = file.name.split('.').pop()
+  const path = `disciplinary/${employeeId}/${Date.now()}.${ext}`
+  const { data, error } = await supabase.storage.from('leave-documents').upload(path, file)
+  if (error) return { success: false, error: error.message }
+  const { data: urlData } = supabase.storage.from('leave-documents').getPublicUrl(data.path)
+  return { success: true, url: urlData.publicUrl }
 }
 
 export async function createDisciplinaryRecord(record: {
@@ -112,59 +146,111 @@ export async function createDisciplinaryRecord(record: {
   hearingDate?: string | null
   description: string
   outcome?: string | null
+  documentUrl?: string | null
   createdBy: string
   createdByName: string
-}): Promise<{ success: boolean; error?: string }> {
+  changes: FieldChange[]
+}): Promise<{ success: boolean; id?: string; error?: string }> {
   if (!isDbConfigured()) return { success: true }
   const supabase = createClient()
-  const { error } = await (supabase as any).from('disciplinary_records').insert({
-    employee_id: record.employeeId,
-    type: record.type,
-    incident_date: record.incidentDate,
-    hearing_date: record.hearingDate ?? null,
-    description: record.description,
-    outcome: record.outcome ?? null,
-    status: 'draft',
-    created_by: record.createdBy,
-    created_by_name: record.createdByName,
-  })
+  const { data, error } = await (supabase as any)
+    .from('disciplinary_records')
+    .insert({
+      employee_id:     record.employeeId,
+      type:            record.type,
+      incident_date:   record.incidentDate,
+      hearing_date:    record.hearingDate ?? null,
+      description:     record.description,
+      outcome:         record.outcome ?? null,
+      document_url:    record.documentUrl ?? null,
+      status:          'draft',
+      created_by:      record.createdBy,
+      created_by_name: record.createdByName,
+    })
+    .select('id')
+    .single()
+
   if (error) return { success: false, error: error.message }
-  return { success: true }
+
+  await writeAuditEntry({
+    recordId:  data.id,
+    action:    'created',
+    actorId:   record.createdBy,
+    actorName: record.createdByName,
+    changes:   record.changes,
+  })
+
+  return { success: true, id: data.id }
 }
 
-export async function updateDisciplinaryRecord(id: string, updates: {
-  type?: DisciplinaryType
-  incidentDate?: string
-  hearingDate?: string | null
-  description?: string
-  outcome?: string | null
-}): Promise<{ success: boolean; error?: string }> {
+export async function updateDisciplinaryRecord(
+  id: string,
+  updates: {
+    type?: DisciplinaryType
+    incidentDate?: string
+    hearingDate?: string | null
+    description?: string
+    outcome?: string | null
+    documentUrl?: string | null
+  },
+  audit: {
+    actorId: string
+    actorName: string
+    changes: FieldChange[]
+  }
+): Promise<{ success: boolean; error?: string }> {
   if (!isDbConfigured()) return { success: true }
   const supabase = createClient()
   const { error } = await (supabase as any)
     .from('disciplinary_records')
     .update({
-      ...(updates.type          !== undefined && { type: updates.type }),
-      ...(updates.incidentDate  !== undefined && { incident_date: updates.incidentDate }),
-      ...(updates.hearingDate   !== undefined && { hearing_date: updates.hearingDate }),
-      ...(updates.description   !== undefined && { description: updates.description }),
-      ...(updates.outcome       !== undefined && { outcome: updates.outcome }),
+      ...(updates.type         !== undefined && { type:          updates.type }),
+      ...(updates.incidentDate !== undefined && { incident_date: updates.incidentDate }),
+      ...(updates.hearingDate  !== undefined && { hearing_date:  updates.hearingDate }),
+      ...(updates.description  !== undefined && { description:   updates.description }),
+      ...(updates.outcome      !== undefined && { outcome:        updates.outcome }),
+      ...(updates.documentUrl  !== undefined && { document_url:  updates.documentUrl }),
       updated_at: new Date().toISOString(),
     })
     .eq('id', id)
-    .eq('status', 'draft') // backend enforcement: only drafts are editable
+    .eq('status', 'draft')
+
   if (error) return { success: false, error: error.message }
+
+  if (audit.changes.length > 0) {
+    await writeAuditEntry({
+      recordId:  id,
+      action:    'edited',
+      actorId:   audit.actorId,
+      actorName: audit.actorName,
+      changes:   audit.changes,
+    })
+  }
+
   return { success: true }
 }
 
-export async function finaliseDisciplinaryRecord(id: string): Promise<{ success: boolean; error?: string }> {
+export async function finaliseDisciplinaryRecord(
+  id: string,
+  audit: { actorId: string; actorName: string }
+): Promise<{ success: boolean; error?: string }> {
   if (!isDbConfigured()) return { success: true }
   const supabase = createClient()
   const { error } = await (supabase as any)
     .from('disciplinary_records')
     .update({ status: 'finalised', updated_at: new Date().toISOString() })
     .eq('id', id)
-    .eq('status', 'draft') // only drafts can be finalised
+    .eq('status', 'draft')
+
   if (error) return { success: false, error: error.message }
+
+  await writeAuditEntry({
+    recordId:  id,
+    action:    'finalised',
+    actorId:   audit.actorId,
+    actorName: audit.actorName,
+    changes:   [{ field: 'status', label: 'Status', previousValue: 'Draft', newValue: 'Finalised' }],
+  })
+
   return { success: true }
 }

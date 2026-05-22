@@ -27,6 +27,7 @@ import {
 } from "lucide-react"
 import { format } from "date-fns"
 import type { ProfileAuditEntry } from "@/components/profile-edit-dialog"
+import { apiFetch } from "@/lib/api-fetch"
 
 const ROLE_LABELS: Record<string, string> = {
   employee:     "Employee",
@@ -120,9 +121,8 @@ export default function ProfilePage() {
       !process.env.NEXT_PUBLIC_SUPABASE_URL.includes("placeholder")
     )
     if (dbReady) {
-      const res = await fetch("/api/profile/update", {
+      const res = await apiFetch("/api/profile/update", {
         method: "PATCH",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(updates),
       })
       if (!res.ok) throw new Error("Failed to save")
