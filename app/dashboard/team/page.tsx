@@ -34,19 +34,19 @@ export default function TeamPage() {
   const fetchTeam = useCallback(async () => {
     if (!user) return
     setIsLoadingData(true)
-
-    const dbReady = !!(process.env.NEXT_PUBLIC_SUPABASE_URL && !process.env.NEXT_PUBLIC_SUPABASE_URL.includes("placeholder"))
-
-    if (!dbReady) {
-      // Filter demo employees whose managerId matches the current user
-      setTeamMembers(DEMO_EMPLOYEES.filter((e) => e.managerId === user.id))
+    try {
+      const dbReady = !!(process.env.NEXT_PUBLIC_SUPABASE_URL && !process.env.NEXT_PUBLIC_SUPABASE_URL.includes("placeholder"))
+      if (!dbReady) {
+        setTeamMembers(DEMO_EMPLOYEES.filter((e) => e.managerId === user.id))
+        return
+      }
+      const all = await getAllEmployees()
+      setTeamMembers(all.filter((e) => e.managerId === user.id))
+    } catch {
+      setTeamMembers([])
+    } finally {
       setIsLoadingData(false)
-      return
     }
-
-    const all = await getAllEmployees()
-    setTeamMembers(all.filter((e) => e.managerId === user.id))
-    setIsLoadingData(false)
   }, [user])
 
   useEffect(() => {

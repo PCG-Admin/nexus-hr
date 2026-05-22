@@ -160,12 +160,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     init()
 
-    // Re-validate when the tab becomes visible again — catches the
-    // "left it for an hour, background timer was throttled" case.
-    // Only runs if there is actually a stored session to validate.
+    // Re-validate when the tab becomes visible again.
+    // VS Code webview suspends ALL network connections when VS Code loses focus.
+    // After a long absence (>3 min) every pending and new Supabase call hangs,
+    // so we force a full page reload to get fresh connections instead of leaving
+    // every data-fetch stuck at "Loading...".
+    // For short absences we just re-validate the session token with getUser().
+    let hiddenAt = 0
     async function handleVisibilityChange() {
-      if (document.visibilityState !== 'visible') return
+      if (document.visibilityState === 'hidden') {
+        hiddenAt = Date.now()
+        return
+      }
       if (!localStorage.getItem('nexus-hr-auth')) return
+
+      if (hiddenAt > 0 && Date.now() - hiddenAt > 3 * 60 * 1000) {
+        window.location.reload()
+        return
+      }
+
       try {
         const { data: { user: authUser }, error } = await supabase.auth.getUser()
         if (!mounted) return

@@ -143,7 +143,7 @@ export function NavHeader() {
                   onClick={() => router.push("/dashboard/approvals")}
                 >
                   <Users className="w-4 h-4 mr-2" />
-                  Team Approvals
+                  Leave Approvals
                 </Button>
               )}
               {isAdmin && (

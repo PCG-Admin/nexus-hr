@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(rm -rf \"c:/PCG PROJECTS 2026/PCG Projects/nexus hr/leave-platform/app/preview\")",
+      "Bash(npx shadcn@latest add switch --yes)",
+      "Bash(Get-ChildItem \"C:\\\\Users\\\\asmah\\\\.claude\\\\projects\\\\c--PCG-PROJECTS-2026-PCG-Projects-nexus-hr-leave-platform\\\\memory\\\\\" -File)"
+    ],
+    "additionalDirectories": [
+      "c:\\PCG PROJECTS 2026\\PCG Projects\\nexus hr\\leave-platform\\app\\preview"
+    ]
+  }
+}

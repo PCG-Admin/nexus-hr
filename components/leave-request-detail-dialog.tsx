@@ -2,22 +2,43 @@
 
 import { useState, useEffect } from "react"
 import { format } from "date-fns"
-import { Calendar, Clock, FileText, ExternalLink, Pencil, X, AlertCircle } from "lucide-react"
+import { Calendar, Clock, FileText, ExternalLink, Pencil, X, AlertCircle, History } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { updateLeaveRequest, uploadDocument, type LeaveRequest } from "@/lib/supabase/leave-service"
+import { updateLeaveRequest, uploadDocument, getLeaveLedger, type LeaveRequest, type LeaveLedgerEntry } from "@/lib/supabase/leave-service"
 import { getPublicHolidayDates, countWorkingDays } from "@/lib/supabase/holiday-service"
 import { useAuth } from "@/lib/auth"
 
 const STATUS_STYLES: Record<string, string> = {
-  pending:   "bg-amber-100 text-amber-800 border-amber-300",
-  approved:  "bg-emerald-100 text-emerald-800 border-emerald-300",
-  rejected:  "bg-red-100 text-red-800 border-red-300",
-  cancelled: "bg-slate-100 text-slate-800 border-slate-300",
+  pending:     "bg-amber-100 text-amber-800 border-amber-300",
+  pending_ceo: "bg-blue-100 text-blue-800 border-blue-300",
+  approved:    "bg-emerald-100 text-emerald-800 border-emerald-300",
+  rejected:    "bg-red-100 text-red-800 border-red-300",
+  cancelled:   "bg-slate-100 text-slate-800 border-slate-300",
+}
+
+const ACTION_LABELS: Record<string, string> = {
+  submitted:        "Submitted",
+  edited:           "Edited",
+  manager_approved: "Manager Approved",
+  approved:         "Approved",
+  rejected:         "Rejected",
+  cancelled:        "Cancelled",
+  admin_edited:     "Admin Override",
+}
+
+const ACTION_COLORS: Record<string, string> = {
+  submitted:        "bg-blue-500",
+  edited:           "bg-slate-400",
+  manager_approved: "bg-amber-500",
+  approved:         "bg-emerald-500",
+  rejected:         "bg-red-500",
+  cancelled:        "bg-slate-400",
+  admin_edited:     "bg-purple-500",
 }
 
 type Props = {
@@ -41,8 +62,9 @@ export function LeaveRequestDetailDialog({ request, onClose, onUpdated }: Props)
   const [removeDocument, setRemoveDocument] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
   const [error, setError] = useState("")
+  const [ledger, setLedger] = useState<LeaveLedgerEntry[]>([])
 
-  // Populate edit fields when request changes
+  // Populate edit fields and load ledger when request changes
   useEffect(() => {
     if (request) {
       setStartDate(request.startDate)
@@ -53,6 +75,7 @@ export function LeaveRequestDetailDialog({ request, onClose, onUpdated }: Props)
       setError("")
       setDocument(null)
       setRemoveDocument(false)
+      getLeaveLedger(request.id).then(setLedger)
     }
   }, [request])
 
@@ -100,13 +123,11 @@ export function LeaveRequestDetailDialog({ request, onClose, onUpdated }: Props)
         documentUrl = null
       }
 
-      const result = await updateLeaveRequest(request.id, {
-        startDate,
-        endDate,
-        daysRequested,
-        reason: reason || undefined,
-        documentUrl,
-      })
+      const result = await updateLeaveRequest(
+        request.id,
+        { startDate, endDate, daysRequested, reason: reason || undefined, documentUrl },
+        user ? { id: user.id, name: `${user.firstName} ${user.lastName}` } : undefined
+      )
 
       if (!result.success) {
         // This is where the race condition message surfaces to the user
@@ -278,6 +299,43 @@ export function LeaveRequestDetailDialog({ request, onClose, onUpdated }: Props)
           <p className="text-xs text-muted-foreground">
             Submitted on {format(new Date(request.createdAt), "d MMMM yyyy")}
           </p>
+
+          {/* Ledger timeline */}
+          {ledger.length > 0 && (
+            <div className="space-y-2">
+              <div className="flex items-center gap-2">
+                <History className="w-3.5 h-3.5 text-muted-foreground" />
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Activity History</p>
+              </div>
+              <div className="relative space-y-0 pl-1">
+                {ledger.map((entry, idx) => (
+                  <div key={entry.id} className="relative flex gap-3 pb-4">
+                    {idx < ledger.length - 1 && (
+                      <div className="absolute left-[9px] top-5 bottom-0 w-px bg-border" />
+                    )}
+                    <div className={`relative z-10 mt-1 w-[18px] h-[18px] rounded-full flex items-center justify-center shrink-0 ${ACTION_COLORS[entry.action] ?? "bg-slate-400"}`} />
+                    <div className="flex-1 min-w-0 pt-0.5">
+                      <div className="flex items-baseline gap-2 flex-wrap">
+                        <span className="text-xs font-semibold">{ACTION_LABELS[entry.action] ?? entry.action}</span>
+                        <span className="text-xs text-muted-foreground">by {entry.actorName}</span>
+                        <span className="text-xs text-muted-foreground ml-auto">
+                          {format(new Date(entry.createdAt), "d MMM yyyy · HH:mm")}
+                        </span>
+                      </div>
+                      {entry.notes && (
+                        <p className="text-xs text-muted-foreground mt-0.5 italic">"{entry.notes}"</p>
+                      )}
+                      {entry.action === 'edited' && entry.startDate && entry.endDate && (
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          Dates updated to {format(new Date(entry.startDate + "T00:00:00"), "d MMM")} – {format(new Date(entry.endDate + "T00:00:00"), "d MMM yyyy")} · {entry.daysRequested} day{entry.daysRequested !== 1 ? "s" : ""}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Footer actions */}

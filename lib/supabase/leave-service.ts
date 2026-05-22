@@ -5,19 +5,40 @@ import type { UserRole } from '@/lib/auth'
 const isDbConfigured = () =>
   process.env.NEXT_PUBLIC_SUPABASE_URL !== 'https://placeholder.supabase.co'
 
+// Append a permanent ledger entry — fire-and-forget, never throws
+async function writeLedger(entry: {
+  leaveRequestId: string
+  actorId: string
+  actorName: string
+  action: string
+  fromStatus: string | null
+  toStatus: string
+  notes?: string | null
+  daysRequested?: number | null
+  startDate?: string | null
+  endDate?: string | null
+}) {
+  const supabase = createClient()
+  await supabase.from('leave_ledger').insert({
+    leave_request_id: entry.leaveRequestId,
+    actor_id:         entry.actorId,
+    actor_name:       entry.actorName,
+    action:           entry.action,
+    from_status:      entry.fromStatus,
+    to_status:        entry.toStatus,
+    notes:            entry.notes ?? null,
+    days_requested:   entry.daysRequested ?? null,
+    start_date:       entry.startDate ?? null,
+    end_date:         entry.endDate ?? null,
+  })
+}
+
 type LeaveTypeRow = Database['public']['Tables']['leave_types']['Row']
 type LeaveBalanceRow = Database['public']['Tables']['leave_balances']['Row']
 type LeaveRequestRow = Database['public']['Tables']['leave_requests']['Row']
 type LeaveRequestInsert = Database['public']['Tables']['leave_requests']['Insert']
 
 // Transformed types for the UI
-export type LeaveType = {
-  id: string
-  name: string
-  defaultDays: number
-  color: string | null
-  requiresDocumentation?: boolean
-}
 
 export type LeaveBalance = {
   id: string
@@ -29,6 +50,50 @@ export type LeaveBalance = {
   availableDays: number
   year: number
   color: string | null
+}
+
+export type LeaveType = {
+  id: string
+  name: string
+  defaultDays: number
+  color: string | null
+  isActive: boolean
+  requiresManagerApproval: boolean
+  requiresDocument: boolean
+}
+
+export async function getLeaveTypes(): Promise<LeaveType[]> {
+  if (!isDbConfigured()) return []
+  const supabase = createClient()
+  const { data, error } = await supabase
+    .from('leave_types')
+    .select('id, name, default_days, color, is_active, requires_manager_approval, requires_document')
+    .order('name')
+  if (error || !data) return []
+  return (data as any[]).map(r => ({
+    id:                      r.id as string,
+    name:                    r.name as string,
+    defaultDays:             r.default_days as number,
+    color:                   r.color as string | null,
+    isActive:                r.is_active as boolean,
+    requiresManagerApproval: (r.requires_manager_approval ?? true) as boolean,
+    requiresDocument:        (r.requires_document ?? false) as boolean,
+  }))
+}
+
+export async function updateLeaveType(
+  id: string,
+  config: { requiresManagerApproval?: boolean; requiresDocument?: boolean; defaultDays?: number }
+): Promise<{ success: boolean; error?: string }> {
+  if (!isDbConfigured()) return { success: true }
+  const supabase = createClient()
+  const update: Record<string, unknown> = {}
+  if (config.requiresManagerApproval !== undefined) update.requires_manager_approval = config.requiresManagerApproval
+  if (config.requiresDocument !== undefined)        update.requires_document         = config.requiresDocument
+  if (config.defaultDays !== undefined)             update.default_days              = config.defaultDays
+  const { error } = await supabase.from('leave_types').update(update).eq('id', id)
+  if (error) return { success: false, error: error.message }
+  return { success: true }
 }
 
 export type LeaveRequest = {
@@ -52,25 +117,6 @@ export type LeaveRequest = {
   isOverride?: boolean
 }
 
-// Fetch all leave types
-export async function getLeaveTypes(): Promise<LeaveType[]> {
-  const supabase = createClient()
-
-  const { data, error } = await supabase
-    .from('leave_types')
-    .select('*')
-    .order('name')
-
-  if (error) return []
-
-  return (data as LeaveTypeRow[]).map(row => ({
-    id: row.id,
-    name: row.name,
-    defaultDays: row.default_days,
-    color: row.color,
-    requiresDocumentation: false,
-  }))
-}
 
 // Fetch leave balances for a user
 export async function getLeaveBalances(userId: string, year?: number): Promise<LeaveBalance[]> {
@@ -175,9 +221,22 @@ export async function submitLeaveRequest(request: {
   if (!isDbConfigured()) return { success: true }
   const supabase = createClient()
 
-  // Managers/admins bypass stage-1 and go straight to final-approval queue
+  // Determine initial status:
+  // 1. Elevated roles always bypass manager stage
+  // 2. Leave types with requires_manager_approval = false go direct to HR queue
+  // 3. Otherwise standard two-stage: pending → manager → pending_ceo → HR
   const isElevatedRole = request.userRole === 'line_manager' || request.userRole === 'hr_manager' || request.userRole === 'system_admin'
-  const initialStatus = isElevatedRole ? 'pending_ceo' : 'pending'
+  let initialStatus: 'pending' | 'pending_ceo' = isElevatedRole ? 'pending_ceo' : 'pending'
+  if (!isElevatedRole && initialStatus === 'pending') {
+    const { data: ltRow } = await supabase
+      .from('leave_types')
+      .select('requires_manager_approval')
+      .eq('id', request.leaveTypeId)
+      .single()
+    if (ltRow && ltRow.requires_manager_approval === false) {
+      initialStatus = 'pending_ceo'
+    }
+  }
 
   const insertData: LeaveRequestInsert = {
     user_id: request.userId,
@@ -208,6 +267,19 @@ export async function submitLeaveRequest(request: {
   }
 
   const row = data as unknown as LeaveRequestRow & { leave_types: { name: string } }
+
+  // Ledger — initial submission
+  writeLedger({
+    leaveRequestId: row.id,
+    actorId:        request.userId,
+    actorName:      request.employeeName || 'Employee',
+    action:         'submitted',
+    fromStatus:     null,
+    toStatus:       row.status,
+    daysRequested:  row.days_requested,
+    startDate:      row.start_date,
+    endDate:        row.end_date,
+  })
 
   // Notify the right audience based on initial status
   fetch('/api/notifications/create', {
@@ -422,6 +494,16 @@ export async function managerApproveLeaveRequest(
     return { success: false, error: error.message }
   }
 
+  writeLedger({
+    leaveRequestId: requestId,
+    actorId:        managerId,
+    actorName:      names?.managerName || 'Manager',
+    action:         'manager_approved',
+    fromStatus:     'pending',
+    toStatus:       'pending_ceo',
+    notes:          notes ?? null,
+  })
+
   if (names) {
     fetch('/api/notifications/create', {
       method: 'POST',
@@ -447,7 +529,8 @@ export async function managerApproveLeaveRequest(
 export async function approveLeaveRequest(
   requestId: string,
   reviewerId: string,
-  notes?: string
+  notes?: string,
+  reviewerName?: string
 ): Promise<{ success: boolean; error?: string }> {
   const supabase = createClient()
 
@@ -467,6 +550,16 @@ export async function approveLeaveRequest(
     return { success: false, error: error.message }
   }
 
+  writeLedger({
+    leaveRequestId: requestId,
+    actorId:        reviewerId,
+    actorName:      reviewerName || 'HR / Admin',
+    action:         'approved',
+    fromStatus:     'pending_ceo',
+    toStatus:       'approved',
+    notes:          notes ?? null,
+  })
+
   return { success: true }
 }
 
@@ -474,9 +567,16 @@ export async function approveLeaveRequest(
 export async function rejectLeaveRequest(
   requestId: string,
   reviewerId: string,
-  notes?: string
+  notes?: string,
+  reviewerName?: string
 ): Promise<{ success: boolean; error?: string }> {
   const supabase = createClient()
+
+  const { data: current } = await supabase
+    .from('leave_requests')
+    .select('status')
+    .eq('id', requestId)
+    .single()
 
   const { error } = await supabase
     .from('leave_requests')
@@ -493,6 +593,16 @@ export async function rejectLeaveRequest(
     console.error('Error rejecting leave request:', error)
     return { success: false, error: error.message }
   }
+
+  writeLedger({
+    leaveRequestId: requestId,
+    actorId:        reviewerId,
+    actorName:      reviewerName || 'HR / Admin',
+    action:         'rejected',
+    fromStatus:     current?.status ?? null,
+    toStatus:       'rejected',
+    notes:          notes ?? null,
+  })
 
   return { success: true }
 }
@@ -535,6 +645,50 @@ export async function getAllEmployees(): Promise<Employee[]> {
     idNumber: (row.id_number as string | null) ?? null,
     dateOfBirth: (row.date_of_birth as string | null) ?? null,
     isActive: (row.is_active as boolean) ?? true,
+  }))
+}
+
+// Leave ledger types
+export type LeaveLedgerEntry = {
+  id: string
+  leaveRequestId: string
+  actorId: string
+  actorName: string
+  action: string
+  fromStatus: string | null
+  toStatus: string
+  notes: string | null
+  daysRequested: number | null
+  startDate: string | null
+  endDate: string | null
+  createdAt: string
+}
+
+export async function getLeaveLedger(leaveRequestId: string): Promise<LeaveLedgerEntry[]> {
+  if (!isDbConfigured()) return []
+  const supabase = createClient()
+
+  const { data, error } = await supabase
+    .from('leave_ledger')
+    .select('*')
+    .eq('leave_request_id', leaveRequestId)
+    .order('created_at', { ascending: true })
+
+  if (error || !data) return []
+
+  return (data as Record<string, unknown>[]).map(row => ({
+    id:              row.id as string,
+    leaveRequestId:  row.leave_request_id as string,
+    actorId:         row.actor_id as string,
+    actorName:       row.actor_name as string,
+    action:          row.action as string,
+    fromStatus:      (row.from_status as string | null) ?? null,
+    toStatus:        row.to_status as string,
+    notes:           (row.notes as string | null) ?? null,
+    daysRequested:   (row.days_requested as number | null) ?? null,
+    startDate:       (row.start_date as string | null) ?? null,
+    endDate:         (row.end_date as string | null) ?? null,
+    createdAt:       row.created_at as string,
   }))
 }
 
@@ -634,7 +788,8 @@ export async function updateLeaveRequest(
     daysRequested: number
     reason?: string
     documentUrl?: string | null
-  }
+  },
+  actor?: { id: string; name: string }
 ): Promise<{ success: boolean; error?: string }> {
   const supabase = createClient()
 
@@ -670,6 +825,21 @@ export async function updateLeaveRequest(
     .eq('status', 'pending')
 
   if (error) return { success: false, error: error.message }
+
+  if (actor) {
+    writeLedger({
+      leaveRequestId: requestId,
+      actorId:        actor.id,
+      actorName:      actor.name,
+      action:         'edited',
+      fromStatus:     'pending',
+      toStatus:       'pending',
+      daysRequested:  updates.daysRequested,
+      startDate:      updates.startDate,
+      endDate:        updates.endDate,
+    })
+  }
+
   return { success: true }
 }
 

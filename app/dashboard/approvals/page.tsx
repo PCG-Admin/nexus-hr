@@ -16,7 +16,8 @@ import {
   type LeaveRequestWithEmployee,
 } from "@/lib/supabase/leave-service"
 import { AdminEditLeaveDialog } from "@/components/admin-edit-leave-dialog"
-import { CheckCircle2, FileText, ExternalLink, Pencil, CalendarDays } from "lucide-react"
+import { LeaveRequestDetailDialog } from "@/components/leave-request-detail-dialog"
+import { CheckCircle2, FileText, ExternalLink, Pencil, CalendarDays, Eye } from "lucide-react"
 import { format } from "date-fns"
 import { DEMO_LEAVE_REQUESTS } from "@/lib/demo-data"
 
@@ -28,23 +29,27 @@ export default function ApprovalsPage() {
   const [isLoadingRequests, setIsLoadingRequests] = useState(true)
   const [processingId, setProcessingId] = useState<string | null>(null)
   const [editingRequest, setEditingRequest] = useState<LeaveRequestWithEmployee | null>(null)
+  const [viewingRequest, setViewingRequest] = useState<LeaveRequestWithEmployee | null>(null)
 
   const fetchRequests = useCallback(async () => {
     if (!user) return
     setIsLoadingRequests(true)
-    const dbReady = !!(process.env.NEXT_PUBLIC_SUPABASE_URL && !process.env.NEXT_PUBLIC_SUPABASE_URL.includes('placeholder'))
-    if (!dbReady) {
-      // Line managers only see requests from their own team
-      const requests = user.role === "line_manager"
-        ? DEMO_LEAVE_REQUESTS.filter(r => r.employee.managerId === user.id)
-        : DEMO_LEAVE_REQUESTS
+    try {
+      const dbReady = !!(process.env.NEXT_PUBLIC_SUPABASE_URL && !process.env.NEXT_PUBLIC_SUPABASE_URL.includes('placeholder'))
+      if (!dbReady) {
+        const requests = user.role === "line_manager"
+          ? DEMO_LEAVE_REQUESTS.filter(r => r.employee.managerId === user.id)
+          : DEMO_LEAVE_REQUESTS
+        setAllRequests(requests)
+        return
+      }
+      const requests = await getAllLeaveRequests()
       setAllRequests(requests)
+    } catch {
+      setAllRequests([])
+    } finally {
       setIsLoadingRequests(false)
-      return
     }
-    const requests = await getAllLeaveRequests()
-    setAllRequests(requests)
-    setIsLoadingRequests(false)
   }, [user])
 
   useEffect(() => {
@@ -87,7 +92,7 @@ export default function ApprovalsPage() {
     let result
     if (isFinalApprover) {
       // CEO final approval
-      result = await approveLeaveRequest(requestId, user.id, notes)
+      result = await approveLeaveRequest(requestId, user.id, notes, `${user.firstName} ${user.lastName}`)
       if (result.success) {
         await fetch("/api/cron/update-leave-balances", { method: "POST" })
       }
@@ -119,7 +124,7 @@ export default function ApprovalsPage() {
     if (!user) return
 
     setProcessingId(requestId)
-    const result = await rejectLeaveRequest(requestId, user.id, notes)
+    const result = await rejectLeaveRequest(requestId, user.id, notes, `${user.firstName} ${user.lastName}`)
 
     if (result.success) {
       // Refresh the list
@@ -145,7 +150,7 @@ export default function ApprovalsPage() {
 
       <main className="container mx-auto px-4 py-8">
         <div className="mb-8">
-          <h2 className="text-3xl font-bold tracking-tight">Team Leave Approvals</h2>
+          <h2 className="text-3xl font-bold tracking-tight">Leave Approvals</h2>
           <p className="text-muted-foreground mt-1">Review and approve leave requests from your team members</p>
         </div>
 
@@ -293,14 +298,24 @@ export default function ApprovalsPage() {
                               </a>
                             )}
                           </div>
-                          <button
-                            onClick={() => setEditingRequest(request)}
-                            className="shrink-0 flex items-center gap-1.5 text-xs text-muted-foreground hover:text-primary border rounded px-2 py-1.5 hover:border-primary transition-colors"
-                            title="Override approved leave"
-                          >
-                            <Pencil className="w-3.5 h-3.5" />
-                            Override
-                          </button>
+                          <div className="flex items-center gap-2 shrink-0">
+                            <button
+                              onClick={() => setViewingRequest(request)}
+                              className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-primary border rounded px-2 py-1.5 hover:border-primary transition-colors"
+                              title="View request details and activity history"
+                            >
+                              <Eye className="w-3.5 h-3.5" />
+                              View
+                            </button>
+                            <button
+                              onClick={() => setEditingRequest(request)}
+                              className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-primary border rounded px-2 py-1.5 hover:border-primary transition-colors"
+                              title="Override approved leave"
+                            >
+                              <Pencil className="w-3.5 h-3.5" />
+                              Override
+                            </button>
+                          </div>
                         </div>
                       </CardContent>
                     </Card>
@@ -320,7 +335,7 @@ export default function ApprovalsPage() {
                   {rejectedRequests.map((request) => (
                     <Card key={request.id}>
                       <CardContent className="pt-6">
-                        <div className="flex items-start justify-between">
+                        <div className="flex items-start justify-between gap-4">
                           <div className="space-y-2 flex-1">
                             <div className="flex items-center gap-2">
                               <h4 className="font-semibold">
@@ -351,6 +366,14 @@ export default function ApprovalsPage() {
                               </a>
                             )}
                           </div>
+                          <button
+                            onClick={() => setViewingRequest(request)}
+                            className="shrink-0 flex items-center gap-1.5 text-xs text-muted-foreground hover:text-primary border rounded px-2 py-1.5 hover:border-primary transition-colors"
+                            title="View request details and activity history"
+                          >
+                            <Eye className="w-3.5 h-3.5" />
+                            View
+                          </button>
                         </div>
                       </CardContent>
                     </Card>
@@ -417,6 +440,15 @@ export default function ApprovalsPage() {
         onClose={() => setEditingRequest(null)}
         onUpdated={async () => {
           setEditingRequest(null)
+          await fetchRequests()
+        }}
+      />
+
+      <LeaveRequestDetailDialog
+        request={viewingRequest}
+        onClose={() => setViewingRequest(null)}
+        onUpdated={async () => {
+          setViewingRequest(null)
           await fetchRequests()
         }}
       />

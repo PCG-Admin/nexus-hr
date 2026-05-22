@@ -19,11 +19,16 @@ import {
   getAllLeaveRequests,
   getAllLeaveBalances,
   updateLeaveBalance,
+  getLeaveTypes,
+  updateLeaveType,
   type Employee,
   type LeaveRequestWithEmployee,
   type LeaveBalanceWithEmployee,
+  type LeaveType,
 } from "@/lib/supabase/leave-service"
-import { Users, CheckCircle2, Clock, TrendingUp, Edit, Search, ChevronDown, ChevronRight, UserIcon, UserPlus, Trash2, CalendarDays, Plus, Building2, GraduationCap, X, Settings2 } from "lucide-react"
+import { Switch } from "@/components/ui/switch"
+import { Label } from "@/components/ui/label"
+import { Users, CheckCircle2, Clock, TrendingUp, Edit, Search, ChevronDown, ChevronRight, UserIcon, UserPlus, Trash2, CalendarDays, Plus, Building2, GraduationCap, X, Settings2, GitBranch, FileCheck, ArrowRight } from "lucide-react"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { format } from "date-fns"
 import { Badge } from "@/components/ui/badge"
@@ -55,6 +60,9 @@ export default function AdminDashboardPage() {
   const [isDeleting, setIsDeleting] = useState(false)
   const [disciplinaryEmployee, setDisciplinaryEmployee] = useState<Employee | null>(null)
 
+  const [leaveTypes, setLeaveTypes] = useState<LeaveType[]>([])
+  const [savingLeaveTypeId, setSavingLeaveTypeId] = useState<string | null>(null)
+
   const [orgConfig, setOrgConfig] = useState<OrgConfig>({ departments: [], grades: [] })
   const [newDeptName, setNewDeptName] = useState("")
   const [newGradeValue, setNewGradeValue] = useState("")
@@ -70,21 +78,27 @@ export default function AdminDashboardPage() {
 
   const fetchData = useCallback(async () => {
     setIsLoadingData(true)
-    const dbReady = !!(process.env.NEXT_PUBLIC_SUPABASE_URL && !process.env.NEXT_PUBLIC_SUPABASE_URL.includes('placeholder'))
-    if (!dbReady) {
-      setEmployees(DEMO_EMPLOYEES)
+    try {
+      const dbReady = !!(process.env.NEXT_PUBLIC_SUPABASE_URL && !process.env.NEXT_PUBLIC_SUPABASE_URL.includes('placeholder'))
+      if (!dbReady) {
+        setEmployees(DEMO_EMPLOYEES)
+        return
+      }
+      const [employeesData, requestsData, balancesData] = await Promise.all([
+        getAllEmployees(),
+        getAllLeaveRequests(),
+        getAllLeaveBalances(),
+      ])
+      setEmployees(employeesData)
+      setAllRequests(requestsData)
+      setLeaveBalances(balancesData)
+    } catch {
+      setEmployees([])
+      setAllRequests([])
+      setLeaveBalances([])
+    } finally {
       setIsLoadingData(false)
-      return
     }
-    const [employeesData, requestsData, balancesData] = await Promise.all([
-      getAllEmployees(),
-      getAllLeaveRequests(),
-      getAllLeaveBalances(),
-    ])
-    setEmployees(employeesData)
-    setAllRequests(requestsData)
-    setLeaveBalances(balancesData)
-    setIsLoadingData(false)
   }, [])
 
   const fetchHolidays = useCallback(async () => {
@@ -150,6 +164,7 @@ export default function AdminDashboardPage() {
       fetchData()
       fetchHolidays()
       setOrgConfig(getOrgConfig())
+      getLeaveTypes().then(setLeaveTypes)
     }
   }, [user, fetchData, fetchHolidays])
 
@@ -187,6 +202,24 @@ export default function AdminDashboardPage() {
     const updated: OrgConfig = { ...orgConfig, grades: orgConfig.grades.filter(g => g !== grade) }
     setOrgConfig(updated)
     saveOrgConfig(updated)
+  }
+
+  const handleUpdateLeaveType = async (id: string, config: { requiresManagerApproval?: boolean; requiresDocument?: boolean; defaultDays?: number }) => {
+    setSavingLeaveTypeId(id)
+    // Optimistic update
+    setLeaveTypes(prev => prev.map(lt => lt.id === id ? {
+      ...lt,
+      ...(config.requiresManagerApproval !== undefined && { requiresManagerApproval: config.requiresManagerApproval }),
+      ...(config.requiresDocument !== undefined && { requiresDocument: config.requiresDocument }),
+      ...(config.defaultDays !== undefined && { defaultDays: config.defaultDays }),
+    } : lt))
+    const result = await updateLeaveType(id, config)
+    if (!result.success) {
+      // Revert on error
+      getLeaveTypes().then(setLeaveTypes)
+      alert(`Failed to update: ${result.error}`)
+    }
+    setSavingLeaveTypeId(null)
   }
 
   const handleEditEmployee = (employee: Employee) => {
@@ -353,6 +386,10 @@ export default function AdminDashboardPage() {
                 <TabsTrigger value="organisation">
                   <Settings2 className="w-3.5 h-3.5 mr-1.5" />
                   Organisation
+                </TabsTrigger>
+                <TabsTrigger value="workflow">
+                  <GitBranch className="w-3.5 h-3.5 mr-1.5" />
+                  Workflow
                 </TabsTrigger>
                 <TabsTrigger value="compliance">BCEA Compliance</TabsTrigger>
               </TabsList>
@@ -756,6 +793,100 @@ export default function AdminDashboardPage() {
                     </CardContent>
                   </Card>
                 </div>
+              </TabsContent>
+
+              {/* Workflow Routing Tab */}
+              <TabsContent value="workflow" className="space-y-6">
+                <div className="flex items-start gap-3 px-4 py-3 rounded-lg bg-blue-50 border border-blue-200 text-sm text-blue-800">
+                  <GitBranch className="w-4 h-4 shrink-0 mt-0.5" />
+                  <span>
+                    Configure the approval path for each leave type. Changes take effect on new submissions immediately.
+                  </span>
+                </div>
+
+                {leaveTypes.length === 0 ? (
+                  <Card>
+                    <CardContent className="py-12 text-center text-muted-foreground">
+                      No leave types found. Run migration 020 in Supabase first.
+                    </CardContent>
+                  </Card>
+                ) : (
+                  <div className="grid gap-4 md:grid-cols-2">
+                    {leaveTypes.map(lt => (
+                      <Card key={lt.id} className={savingLeaveTypeId === lt.id ? "opacity-60 pointer-events-none" : ""}>
+                        <CardContent className="pt-5 pb-5 space-y-4">
+                          {/* Header */}
+                          <div className="flex items-center gap-3">
+                            <div
+                              className="w-3 h-10 rounded-full shrink-0"
+                              style={{ backgroundColor: lt.color ?? "#94a3b8" }}
+                            />
+                            <div className="flex-1 min-w-0">
+                              <p className="font-semibold text-sm">{lt.name}</p>
+                              <p className="text-xs text-muted-foreground">{lt.defaultDays} days default allocation</p>
+                            </div>
+                            {!lt.isActive && (
+                              <Badge variant="outline" className="text-xs text-muted-foreground">Inactive</Badge>
+                            )}
+                          </div>
+
+                          {/* Approval path visual */}
+                          <div className="flex items-center gap-1.5 text-xs text-muted-foreground bg-muted/40 rounded-md px-3 py-2">
+                            <span className="font-medium text-foreground">Employee</span>
+                            <ArrowRight className="w-3 h-3" />
+                            {lt.requiresManagerApproval ? (
+                              <>
+                                <span className="font-medium text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded">Manager</span>
+                                <ArrowRight className="w-3 h-3" />
+                              </>
+                            ) : null}
+                            <span className="font-medium text-emerald-700 bg-emerald-100 px-1.5 py-0.5 rounded">HR / Admin</span>
+                          </div>
+
+                          <div className="space-y-3 border-t pt-3">
+                            {/* Requires manager approval toggle */}
+                            <div className="flex items-center justify-between">
+                              <div className="space-y-0.5">
+                                <Label className="text-sm font-medium cursor-pointer" htmlFor={`mgr-${lt.id}`}>
+                                  Requires Manager Approval
+                                </Label>
+                                <p className="text-xs text-muted-foreground">
+                                  {lt.requiresManagerApproval
+                                    ? "Two-stage: manager → HR"
+                                    : "One-stage: direct to HR"}
+                                </p>
+                              </div>
+                              <Switch
+                                id={`mgr-${lt.id}`}
+                                checked={lt.requiresManagerApproval}
+                                onCheckedChange={checked => handleUpdateLeaveType(lt.id, { requiresManagerApproval: checked })}
+                              />
+                            </div>
+
+                            {/* Requires document toggle */}
+                            <div className="flex items-center justify-between">
+                              <div className="space-y-0.5">
+                                <Label className="text-sm font-medium cursor-pointer" htmlFor={`doc-${lt.id}`}>
+                                  Supporting Document Required
+                                </Label>
+                                <p className="text-xs text-muted-foreground">
+                                  {lt.requiresDocument
+                                    ? "Employees must attach a document"
+                                    : "Document upload is optional"}
+                                </p>
+                              </div>
+                              <Switch
+                                id={`doc-${lt.id}`}
+                                checked={lt.requiresDocument}
+                                onCheckedChange={checked => handleUpdateLeaveType(lt.id, { requiresDocument: checked })}
+                              />
+                            </div>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
+                )}
               </TabsContent>
 
               {/* Compliance Tab */}

@@ -25,11 +25,11 @@ import {
 } from "@/lib/supabase/leave-service"
 
 const DEMO_TYPES: LeaveType[] = [
-  { id: "demo-annual",    name: "Annual Leave",            defaultDays: 15,  requiresDocumentation: false, color: null },
-  { id: "demo-sick",      name: "Sick Leave",              defaultDays: 10,  requiresDocumentation: true,  color: null },
-  { id: "demo-family",    name: "Family Responsibility",   defaultDays: 3,   requiresDocumentation: false, color: null },
-  { id: "demo-maternity", name: "Maternity Leave",         defaultDays: 120, requiresDocumentation: true,  color: null },
-  { id: "demo-parental",  name: "Parental Leave",          defaultDays: 10,  requiresDocumentation: false, color: null },
+  { id: "demo-annual",    name: "Annual Leave",            defaultDays: 15,  requiresDocument: false, requiresManagerApproval: true,  isActive: true, color: null },
+  { id: "demo-sick",      name: "Sick Leave",              defaultDays: 10,  requiresDocument: false, requiresManagerApproval: false, isActive: true, color: null },
+  { id: "demo-family",    name: "Family Responsibility",   defaultDays: 3,   requiresDocument: false, requiresManagerApproval: false, isActive: true, color: null },
+  { id: "demo-maternity", name: "Maternity Leave",         defaultDays: 120, requiresDocument: true,  requiresManagerApproval: false, isActive: true, color: null },
+  { id: "demo-parental",  name: "Parental Leave",          defaultDays: 10,  requiresDocument: true,  requiresManagerApproval: false, isActive: true, color: null },
 ]
 
 const DEMO_BALANCES: LeaveBalance[] = [
@@ -171,7 +171,7 @@ export default function RequestLeavePage() {
     // not a hard rejection. Request proceeds with an override flag visible to the approver.
 
     const selectedType = availableTypes.find((t) => t.id === leaveTypeId)
-    if (selectedType?.requiresDocumentation && !document) {
+    if (selectedType?.requiresDocument && !document) {
       setError(`${selectedType.name} requires supporting documentation (e.g., medical certificate)`)
       setIsSubmitting(false)
       return
@@ -307,7 +307,7 @@ export default function RequestLeavePage() {
                         {availableTypes.map((type) => (
                           <SelectItem key={type.id} value={type.id}>
                             {type.name}
-                            {type.requiresDocumentation && " *"}
+                            {type.requiresDocument && " *"}
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -317,7 +317,7 @@ export default function RequestLeavePage() {
                         Available: {selectedBalance.availableDays} of {selectedBalance.totalDays} days
                       </p>
                     )}
-                    {selectedType?.requiresDocumentation && (
+                    {selectedType?.requiresDocument && (
                       <Alert>
                         <AlertCircle className="h-4 w-4" />
                         <AlertDescription className="text-sm">
@@ -388,7 +388,7 @@ export default function RequestLeavePage() {
                   <div className="space-y-2">
                     <Label htmlFor="document">
                       Supporting Document{" "}
-                      {selectedType?.requiresDocumentation && <span className="text-destructive">*</span>}
+                      {selectedType?.requiresDocument && <span className="text-destructive">*</span>}
                     </Label>
                     <p className="text-sm text-muted-foreground">
                       Upload medical certificates, proof of emergency, or other supporting documents (PDF, JPG, PNG - Max
