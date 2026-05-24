@@ -3,7 +3,14 @@
     "allow": [
       "Bash(rm -rf \"c:/PCG PROJECTS 2026/PCG Projects/nexus hr/leave-platform/app/preview\")",
       "Bash(npx shadcn@latest add switch --yes)",
-      "Bash(Get-ChildItem \"C:\\\\Users\\\\asmah\\\\.claude\\\\projects\\\\c--PCG-PROJECTS-2026-PCG-Projects-nexus-hr-leave-platform\\\\memory\\\\\" -File)"
+      "Bash(Get-ChildItem \"C:\\\\Users\\\\asmah\\\\.claude\\\\projects\\\\c--PCG-PROJECTS-2026-PCG-Projects-nexus-hr-leave-platform\\\\memory\\\\\" -File)",
+      "PowerShell(Get-ChildItem -Path \"c:\\\\PCG PROJECTS 2026\\\\PCG Projects\\\\nexus hr\\\\leave-platform\\\\app\\\\dashboard\" -Recurse | Where-Object { $_.Extension -in '.tsx','.ts' } | Select-Object FullName)",
+      "PowerShell(Get-ChildItem -Path \"c:\\\\PCG PROJECTS 2026\\\\PCG Projects\\\\nexus hr\\\\leave-platform\\\\components\" -Recurse | Where-Object { $_.Extension -in '.tsx','.ts' } | Select-Object FullName)",
+      "PowerShell(Get-ChildItem -Path \"c:\\\\PCG PROJECTS 2026\\\\PCG Projects\\\\nexus hr\\\\leave-platform\\\\lib\" -Recurse | Where-Object { $_.Extension -in '.ts','.tsx' } | Select-Object FullName)",
+      "PowerShell(Get-ChildItem -Path \"c:\\\\PCG PROJECTS 2026\\\\PCG Projects\\\\nexus hr\\\\leave-platform\" -Recurse -File | Where-Object { $_.Extension -eq '.sql' } | Select-Object FullName)",
+      "PowerShell(Get-ChildItem -Path \"c:\\\\PCG PROJECTS 2026\\\\PCG Projects\\\\nexus hr\\\\leave-platform\" -Recurse -Directory | Where-Object { $_.Name -eq 'supabase' -or $_.Name -eq 'migrations' -or $_.Name -eq 'database' } | Select-Object FullName)",
+      "Bash(npx tsc *)",
+      "Bash(npx next *)"
     ],
     "additionalDirectories": [
       "c:\\PCG PROJECTS 2026\\PCG Projects\\nexus hr\\leave-platform\\app\\preview"

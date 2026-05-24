@@ -3,11 +3,14 @@
 import { useAuth } from "@/lib/auth"
 import { Button } from "@/components/ui/button"
 import { useRouter, usePathname } from "next/navigation"
-import { useState, useCallback } from "react"
-import { LogOut, Calendar, Users, Shield, BarChart3, UserCircle, UsersRound, Clock, TrendingUp } from "lucide-react"
+import { useState, useCallback, useEffect } from "react"
+import { LogOut, Calendar, Users, Shield, BarChart3, UserCircle, UsersRound, Clock, TrendingUp, BookOpen, Megaphone } from "lucide-react"
 import Image from "next/image"
 import { NotificationBell } from "@/components/notification-bell"
 import { useSessionTimeout } from "@/hooks/use-session-timeout"
+import { getAnnouncementCount } from "@/lib/supabase/announcement-service"
+
+const LAST_SEEN_KEY = "nexus-announcements-last-seen"
 import {
   Dialog,
   DialogContent,
@@ -51,11 +54,25 @@ export function NavHeader() {
   const isAdmin        = ["hr_manager", "system_admin"].includes(user?.role ?? "")
   const isExecutive    = user?.role === "executive"
   const isLineManager  = user?.role === "line_manager"
-  const isOnApprovals  = pathname?.includes("/approvals")
-  const isOnTeam       = pathname?.includes("/team")
-  const isOnAdmin      = pathname?.includes("/admin") && !pathname?.includes("/admin/reports")
-  const isOnReports    = pathname?.includes("/admin/reports")
-  const isOnPerformance = pathname?.includes("/performance")
+  const isOnApprovals     = pathname?.includes("/approvals")
+  const isOnTeam          = pathname?.includes("/team")
+  const isOnAdmin         = pathname?.includes("/admin") && !pathname?.includes("/admin/reports")
+  const isOnReports       = pathname?.includes("/admin/reports")
+  const isOnPerformance   = pathname?.includes("/performance")
+  const isOnPolicies      = pathname?.includes("/policies")
+  const isOnAnnouncements = pathname?.includes("/announcements")
+
+  const [announcementCount, setAnnouncementCount] = useState(0)
+
+  useEffect(() => {
+    if (!user) return
+    const lastSeen = localStorage.getItem(LAST_SEEN_KEY)
+    getAnnouncementCount(user.department ?? null, user.grade ?? null).then(total => {
+      // Show badge only when not on the announcements page
+      if (!isOnAnnouncements) setAnnouncementCount(total)
+      else setAnnouncementCount(0)
+    })
+  }, [user, isOnAnnouncements])
 
   return (
     <>
@@ -77,7 +94,7 @@ export function NavHeader() {
             </div>
 
             <div className="flex items-center gap-4">
-              {isManager && <NotificationBell />}
+              {user && <NotificationBell />}
               <button
                 onClick={() => router.push("/dashboard/profile")}
                 className="text-right hover:opacity-75 transition-opacity cursor-pointer"
@@ -103,7 +120,7 @@ export function NavHeader() {
 
           <div className="mt-4 flex gap-2">
               <Button
-                variant={!isOnApprovals && !isOnTeam && !isOnAdmin && !isOnReports && !isOnPerformance && !pathname?.includes("/profile") ? "default" : "ghost"}
+                variant={!isOnApprovals && !isOnTeam && !isOnAdmin && !isOnReports && !isOnPerformance && !isOnPolicies && !isOnAnnouncements && !pathname?.includes("/profile") ? "default" : "ghost"}
                 size="sm"
                 onClick={() => router.push("/dashboard")}
               >
@@ -125,6 +142,28 @@ export function NavHeader() {
               >
                 <TrendingUp className="w-4 h-4 mr-2" />
                 Performance
+              </Button>
+              <Button
+                variant={isOnPolicies ? "default" : "ghost"}
+                size="sm"
+                onClick={() => router.push("/dashboard/policies")}
+              >
+                <BookOpen className="w-4 h-4 mr-2" />
+                Policies
+              </Button>
+              <Button
+                variant={isOnAnnouncements ? "default" : "ghost"}
+                size="sm"
+                onClick={() => router.push("/dashboard/announcements")}
+                className="relative"
+              >
+                <Megaphone className="w-4 h-4 mr-2" />
+                Announcements
+                {announcementCount > 0 && !isOnAnnouncements && (
+                  <span className="absolute -top-1 -right-1 flex items-center justify-center min-w-[16px] h-4 px-0.5 text-[9px] font-bold text-white bg-red-500 rounded-full leading-none">
+                    {announcementCount > 9 ? "9+" : announcementCount}
+                  </span>
+                )}
               </Button>
               {isLineManager && (
                 <Button

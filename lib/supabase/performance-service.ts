@@ -69,6 +69,40 @@ function isDbConfigured(): boolean {
   return !!(url && !url.includes("placeholder"))
 }
 
+// ── Performance audit helper ──────────────────────────────────────────────────
+
+async function writePerformanceAudit(params: {
+  reviewId?: string | null
+  employeeId: string
+  employeeName: string
+  actorId: string
+  actorName: string
+  action: 'created' | 'draft_saved' | 'submitted' | 'manager_reviewed' | 'hr_approved'
+  fromStatus?: string | null
+  toStatus?: string | null
+  cycleName?: string | null
+  notes?: string | null
+}): Promise<void> {
+  if (!isDbConfigured()) return
+  try {
+    const supabase = createClient()
+    await (supabase as any).from('performance_audit').insert({
+      review_id:     params.reviewId ?? null,
+      employee_id:   params.employeeId,
+      employee_name: params.employeeName,
+      actor_id:      params.actorId,
+      actor_name:    params.actorName,
+      action:        params.action,
+      from_status:   params.fromStatus ?? null,
+      to_status:     params.toStatus ?? null,
+      cycle_name:    params.cycleName ?? null,
+      notes:         params.notes ?? null,
+    })
+  } catch (err) {
+    console.error('writePerformanceAudit failed:', err)
+  }
+}
+
 // ── Static cycle catalogue ───────────────────────────────────────────────────
 
 export const PERFORMANCE_CYCLES: PerformanceCycle[] = [
@@ -424,6 +458,7 @@ export async function submitReview(
   reviewId: string,
   kpis: KPIEntry[],
   employeeNotes: string | null,
+  audit?: { employeeId: string; employeeName: string; cycleName?: string },
 ): Promise<{ success: boolean; error?: string }> {
   if (!isDbConfigured()) {
     mutateDemoReview(reviewId, {
@@ -432,6 +467,19 @@ export async function submitReview(
       status: "submitted",
       submittedAt: new Date().toISOString(),
     })
+    if (audit) {
+      void writePerformanceAudit({
+        reviewId,
+        employeeId:   audit.employeeId,
+        employeeName: audit.employeeName,
+        actorId:      audit.employeeId,
+        actorName:    audit.employeeName,
+        action:       'submitted',
+        fromStatus:   'draft',
+        toStatus:     'submitted',
+        cycleName:    audit.cycleName ?? null,
+      })
+    }
     return { success: true }
   }
   return { success: false, error: "Database not configured" }
@@ -443,6 +491,7 @@ export async function managerReviewSubmit(
   reviewerName: string,
   kpisWithRatings: KPIEntry[],
   managerNotes: string,
+  audit?: { employeeId: string; employeeName: string; cycleName?: string },
 ): Promise<{ success: boolean; error?: string }> {
   if (!isDbConfigured()) {
     mutateDemoReview(reviewId, {
@@ -453,6 +502,20 @@ export async function managerReviewSubmit(
       managerReviewedAt: new Date().toISOString(),
       status: "manager_reviewed",
     })
+    if (audit) {
+      void writePerformanceAudit({
+        reviewId,
+        employeeId:   audit.employeeId,
+        employeeName: audit.employeeName,
+        actorId:      reviewerId,
+        actorName:    reviewerName,
+        action:       'manager_reviewed',
+        fromStatus:   'submitted',
+        toStatus:     'manager_reviewed',
+        cycleName:    audit.cycleName ?? null,
+        notes:        managerNotes || null,
+      })
+    }
     return { success: true }
   }
   return { success: false, error: "Database not configured" }
@@ -463,6 +526,7 @@ export async function hrApprove(
   reviewerId: string,
   reviewerName: string,
   hrNotes: string,
+  audit?: { employeeId: string; employeeName: string; cycleName?: string },
 ): Promise<{ success: boolean; error?: string }> {
   if (!isDbConfigured()) {
     mutateDemoReview(reviewId, {
@@ -473,6 +537,20 @@ export async function hrApprove(
       status: "hr_approved",
       incentiveGateCleared: true,
     })
+    if (audit) {
+      void writePerformanceAudit({
+        reviewId,
+        employeeId:   audit.employeeId,
+        employeeName: audit.employeeName,
+        actorId:      reviewerId,
+        actorName:    reviewerName,
+        action:       'hr_approved',
+        fromStatus:   'manager_reviewed',
+        toStatus:     'hr_approved',
+        cycleName:    audit.cycleName ?? null,
+        notes:        hrNotes || null,
+      })
+    }
     return { success: true }
   }
   return { success: false, error: "Database not configured" }

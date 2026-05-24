@@ -1,8 +1,8 @@
 "use client"
 
 import { useAuth } from "@/lib/auth"
-import { useRouter } from "next/navigation"
-import { useEffect, useState } from "react"
+import { useRouter, useSearchParams } from "next/navigation"
+import { useEffect, useState, Suspense } from "react"
 import { NavHeader } from "@/components/nav-header"
 import { LeaveBalanceCard } from "@/components/leave-balance-card"
 import { LeaveRequestList } from "@/components/leave-request-list"
@@ -24,6 +24,29 @@ const DEMO_BALANCES: LeaveBalance[] = [
   { id: "demo-4", userId: "", leaveTypeId: "demo-maternity", leaveTypeName: "Maternity Leave",       totalDays: 120, usedDays: 0, availableDays: 120, year: new Date().getFullYear(), color: null },
   { id: "demo-5", userId: "", leaveTypeId: "demo-parental",  leaveTypeName: "Parental Leave",        totalDays: 10,  usedDays: 0, availableDays: 10,  year: new Date().getFullYear(), color: null },
 ]
+
+function RequestDeepLink({
+  leaveRequests,
+  onOpen,
+}: {
+  leaveRequests: LeaveRequest[]
+  onOpen: (r: LeaveRequest) => void
+}) {
+  const searchParams = useSearchParams()
+  const router = useRouter()
+
+  useEffect(() => {
+    const requestId = searchParams.get('request')
+    if (!requestId || leaveRequests.length === 0) return
+    const match = leaveRequests.find(r => r.id === requestId)
+    if (match) {
+      onOpen(match)
+      router.replace('/dashboard', { scroll: false } as any)
+    }
+  }, [searchParams, leaveRequests, onOpen, router])
+
+  return null
+}
 
 export default function DashboardPage() {
   const { user, isLoading } = useAuth()
@@ -213,6 +236,10 @@ export default function DashboardPage() {
           )}
         </div>
       </main>
+
+      <Suspense fallback={null}>
+        <RequestDeepLink leaveRequests={leaveRequests} onOpen={setSelectedRequest} />
+      </Suspense>
 
       <LeaveRequestDetailDialog
         request={selectedRequest}

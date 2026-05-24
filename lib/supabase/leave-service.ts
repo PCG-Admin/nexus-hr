@@ -5,6 +5,26 @@ import type { UserRole } from '@/lib/auth'
 const isDbConfigured = () =>
   process.env.NEXT_PUBLIC_SUPABASE_URL !== 'https://placeholder.supabase.co'
 
+// Fire-and-forget notification via API route — passes the session token so the
+// API can verify the caller even though the session lives in localStorage not cookies.
+async function postNotification(payload: Record<string, unknown>): Promise<void> {
+  try {
+    const supabase = createClient()
+    const { data: { session } } = await supabase.auth.getSession()
+    if (!session?.access_token) return
+    await fetch('/api/notifications/create', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${session.access_token}`,
+      },
+      body: JSON.stringify(payload),
+    })
+  } catch (err) {
+    console.error('postNotification failed:', err)
+  }
+}
+
 // Append a permanent ledger entry — fire-and-forget, never throws
 async function writeLedger(entry: {
   leaveRequestId: string
@@ -282,22 +302,18 @@ export async function submitLeaveRequest(request: {
   })
 
   // Notify the right audience based on initial status
-  fetch('/api/notifications/create', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      leaveRequestId: row.id,
-      employeeName: request.employeeName || 'An employee',
-      leaveTypeName: row.leave_types?.name || 'Leave',
-      startDate: row.start_date,
-      endDate: row.end_date,
-      daysRequested: row.days_requested,
-      targetRoles: isElevatedRole ? ['hr_manager', 'system_admin'] : ['hr_manager', 'system_admin', 'line_manager'],
-      title: request.isOverride
-        ? 'Leave Request — Balance Override Required'
-        : isElevatedRole ? 'Leave Request Awaiting Your Approval' : 'New Leave Request',
-    }),
-  }).catch(err => console.error('Failed to send notifications:', err))
+  postNotification({
+    leaveRequestId: row.id,
+    employeeName: request.employeeName || 'An employee',
+    leaveTypeName: row.leave_types?.name || 'Leave',
+    startDate: row.start_date,
+    endDate: row.end_date,
+    daysRequested: row.days_requested,
+    targetRoles: isElevatedRole ? ['hr_manager', 'system_admin'] : ['hr_manager', 'system_admin', 'line_manager'],
+    title: request.isOverride
+      ? 'Leave Request — Balance Override Required'
+      : isElevatedRole ? 'Leave Request Awaiting Your Approval' : 'New Leave Request',
+  })
 
   return {
     success: true,
@@ -505,21 +521,17 @@ export async function managerApproveLeaveRequest(
   })
 
   if (names) {
-    fetch('/api/notifications/create', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        leaveRequestId: requestId,
-        employeeName: names.employeeName,
-        leaveTypeName: names.leaveTypeName,
-        startDate: names.startDate,
-        endDate: names.endDate,
-        daysRequested: names.daysRequested,
-        targetRoles: ['hr_manager', 'system_admin'],
-        title: 'Leave Request Awaiting Your Approval',
-        message: `${names.managerName} approved ${names.employeeName}'s ${names.leaveTypeName} request (${names.daysRequested} day(s)). Awaiting final approval.`,
-      }),
-    }).catch(err => console.error('Failed to notify HR:', err))
+    postNotification({
+      leaveRequestId: requestId,
+      employeeName: names.employeeName,
+      leaveTypeName: names.leaveTypeName,
+      startDate: names.startDate,
+      endDate: names.endDate,
+      daysRequested: names.daysRequested,
+      targetRoles: ['hr_manager', 'system_admin'],
+      title: 'Leave Request Awaiting Your Approval',
+      message: `${names.managerName} approved ${names.employeeName}'s ${names.leaveTypeName} request (${names.daysRequested} day(s)). Awaiting final approval.`,
+    })
   }
 
   return { success: true }
@@ -530,11 +542,12 @@ export async function approveLeaveRequest(
   requestId: string,
   reviewerId: string,
   notes?: string,
-  reviewerName?: string
+  reviewerName?: string,
+  context?: { employeeName: string; leaveTypeName: string; startDate: string; endDate: string; daysRequested: number; employeeId: string }
 ): Promise<{ success: boolean; error?: string }> {
   const supabase = createClient()
 
-  const { error } = await supabase
+  const { data: row, error } = await supabase
     .from('leave_requests')
     .update({
       status: 'approved',
@@ -544,6 +557,8 @@ export async function approveLeaveRequest(
       updated_at: new Date().toISOString(),
     })
     .eq('id', requestId)
+    .select('user_id')
+    .single()
 
   if (error) {
     console.error('Error approving leave request:', error)
@@ -560,6 +575,20 @@ export async function approveLeaveRequest(
     notes:          notes ?? null,
   })
 
+  // Notify the employee whose request was approved
+  const employeeId = context?.employeeId ?? (row as any)?.user_id
+  if (employeeId) {
+    postNotification({
+      leaveRequestId: requestId,
+      targetUserIds: [employeeId],
+      title: 'Leave Request Approved',
+      message: context
+        ? `Your ${context.leaveTypeName} request (${context.daysRequested} day(s), ${context.startDate} – ${context.endDate}) has been approved by ${reviewerName || 'HR'}.`
+        : `Your leave request has been approved by ${reviewerName || 'HR'}.`,
+      notificationType: 'leave_approved',
+    })
+  }
+
   return { success: true }
 }
 
@@ -568,13 +597,14 @@ export async function rejectLeaveRequest(
   requestId: string,
   reviewerId: string,
   notes?: string,
-  reviewerName?: string
+  reviewerName?: string,
+  context?: { employeeName: string; leaveTypeName: string; startDate: string; endDate: string; daysRequested: number; employeeId: string }
 ): Promise<{ success: boolean; error?: string }> {
   const supabase = createClient()
 
   const { data: current } = await supabase
     .from('leave_requests')
-    .select('status')
+    .select('status, user_id')
     .eq('id', requestId)
     .single()
 
@@ -603,6 +633,20 @@ export async function rejectLeaveRequest(
     toStatus:       'rejected',
     notes:          notes ?? null,
   })
+
+  // Notify the employee whose request was rejected
+  const employeeId = context?.employeeId ?? (current as any)?.user_id
+  if (employeeId) {
+    postNotification({
+      leaveRequestId: requestId,
+      targetUserIds: [employeeId],
+      title: 'Leave Request Declined',
+      message: context
+        ? `Your ${context.leaveTypeName} request (${context.daysRequested} day(s), ${context.startDate} – ${context.endDate}) has been declined by ${reviewerName || 'HR'}${notes ? `: "${notes}"` : '.'}`
+        : `Your leave request has been declined by ${reviewerName || 'HR'}${notes ? `: "${notes}"` : '.'}`,
+      notificationType: 'leave_rejected',
+    })
+  }
 
   return { success: true }
 }

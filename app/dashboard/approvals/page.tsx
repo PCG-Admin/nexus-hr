@@ -1,8 +1,8 @@
 "use client"
 
 import { useAuth } from "@/lib/auth"
-import { useRouter } from "next/navigation"
-import { useEffect, useState, useCallback } from "react"
+import { useRouter, useSearchParams } from "next/navigation"
+import { useEffect, useState, useCallback, Suspense } from "react"
 import { NavHeader } from "@/components/nav-header"
 import { ApprovalRequestCard } from "@/components/approval-request-card"
 import { Card, CardContent } from "@/components/ui/card"
@@ -17,9 +17,33 @@ import {
 } from "@/lib/supabase/leave-service"
 import { AdminEditLeaveDialog } from "@/components/admin-edit-leave-dialog"
 import { LeaveRequestDetailDialog } from "@/components/leave-request-detail-dialog"
+import { TeamCalendar } from "@/components/team-calendar"
 import { CheckCircle2, FileText, ExternalLink, Pencil, CalendarDays, Eye } from "lucide-react"
 import { format } from "date-fns"
 import { DEMO_LEAVE_REQUESTS } from "@/lib/demo-data"
+
+function RequestDeepLink({
+  allRequests,
+  onOpen,
+}: {
+  allRequests: LeaveRequestWithEmployee[]
+  onOpen: (r: LeaveRequestWithEmployee) => void
+}) {
+  const searchParams = useSearchParams()
+  const router = useRouter()
+
+  useEffect(() => {
+    const requestId = searchParams.get('request')
+    if (!requestId || allRequests.length === 0) return
+    const match = allRequests.find(r => r.id === requestId)
+    if (match) {
+      onOpen(match)
+      router.replace('/dashboard/approvals', { scroll: false } as any)
+    }
+  }, [searchParams, allRequests, onOpen, router])
+
+  return null
+}
 
 export default function ApprovalsPage() {
   const { user, isLoading } = useAuth()
@@ -91,8 +115,16 @@ export default function ApprovalsPage() {
 
     let result
     if (isFinalApprover) {
-      // CEO final approval
-      result = await approveLeaveRequest(requestId, user.id, notes, `${user.firstName} ${user.lastName}`)
+      // CEO final approval — pass context so employee gets notified
+      const req = allRequests.find((r) => r.id === requestId)
+      result = await approveLeaveRequest(requestId, user.id, notes, `${user.firstName} ${user.lastName}`, req ? {
+        employeeId: req.userId,
+        employeeName: `${req.employee.firstName} ${req.employee.lastName}`,
+        leaveTypeName: req.leaveTypeName,
+        startDate: req.startDate,
+        endDate: req.endDate,
+        daysRequested: req.daysRequested,
+      } : undefined)
       if (result.success) {
         await fetch("/api/cron/update-leave-balances", { method: "POST" })
       }
@@ -124,7 +156,15 @@ export default function ApprovalsPage() {
     if (!user) return
 
     setProcessingId(requestId)
-    const result = await rejectLeaveRequest(requestId, user.id, notes, `${user.firstName} ${user.lastName}`)
+    const req = allRequests.find((r) => r.id === requestId)
+    const result = await rejectLeaveRequest(requestId, user.id, notes, `${user.firstName} ${user.lastName}`, req ? {
+      employeeId: req.userId,
+      employeeName: `${req.employee.firstName} ${req.employee.lastName}`,
+      leaveTypeName: req.leaveTypeName,
+      startDate: req.startDate,
+      endDate: req.endDate,
+      daysRequested: req.daysRequested,
+    } : undefined)
 
     if (result.success) {
       // Refresh the list
@@ -381,55 +421,9 @@ export default function ApprovalsPage() {
                 </div>
               )}
             </TabsContent>
-            {/* Team Calendar — upcoming approved leave */}
-            <TabsContent value="calendar" className="space-y-4">
-              <p className="text-sm text-muted-foreground">Approved leave scheduled from today onwards</p>
-              {upcomingApproved.length === 0 ? (
-                <Card>
-                  <CardContent className="py-12 text-center text-muted-foreground">
-                    No upcoming approved leave on record
-                  </CardContent>
-                </Card>
-              ) : (
-                <div className="space-y-2">
-                  {upcomingApproved.map((req) => {
-                    const initials = `${req.employee.firstName[0]}${req.employee.lastName[0]}`.toUpperCase()
-                    const isActive = req.startDate <= today && req.endDate >= today
-                    return (
-                      <Card key={req.id}>
-                        <CardContent className="py-3 px-4">
-                          <div className="flex items-center justify-between gap-4">
-                            <div className="flex items-center gap-3">
-                              <div className="w-9 h-9 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
-                                <span className="text-xs font-bold text-primary">{initials}</span>
-                              </div>
-                              <div>
-                                <p className="text-sm font-medium leading-tight">
-                                  {req.employee.firstName} {req.employee.lastName}
-                                </p>
-                                <p className="text-xs text-muted-foreground">{req.leaveTypeName}</p>
-                              </div>
-                            </div>
-                            <div className="flex items-center gap-3">
-                              {isActive && (
-                                <Badge className="bg-emerald-100 text-emerald-800 border-emerald-300 text-xs" variant="outline">
-                                  On Leave Now
-                                </Badge>
-                              )}
-                              <div className="text-right text-sm">
-                                <p className="font-medium">
-                                  {format(new Date(req.startDate), "MMM dd")} – {format(new Date(req.endDate), "MMM dd, yyyy")}
-                                </p>
-                                <p className="text-xs text-muted-foreground">{req.daysRequested} days</p>
-                              </div>
-                            </div>
-                          </div>
-                        </CardContent>
-                      </Card>
-                    )
-                  })}
-                </div>
-              )}
+            {/* Team Calendar */}
+            <TabsContent value="calendar">
+              <TeamCalendar requests={allRequests} onRequestClick={setViewingRequest} />
             </TabsContent>
           </Tabs>
         )}
@@ -443,6 +437,10 @@ export default function ApprovalsPage() {
           await fetchRequests()
         }}
       />
+
+      <Suspense fallback={null}>
+        <RequestDeepLink allRequests={allRequests} onOpen={setViewingRequest} />
+      </Suspense>
 
       <LeaveRequestDetailDialog
         request={viewingRequest}

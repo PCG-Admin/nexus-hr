@@ -354,7 +354,7 @@ export function LeaveRequestDetailDialog({ request, onClose, onUpdated }: Props)
               <Button variant="outline" onClick={onClose}>
                 Close
               </Button>
-              {isPending && (
+              {isPending && user?.id === request.userId && (
                 <Button onClick={() => setEditMode(true)}>
                   <Pencil className="w-4 h-4 mr-2" />
                   Edit Request

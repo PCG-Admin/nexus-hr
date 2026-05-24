@@ -1,15 +1,10 @@
 import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
-import { createClient as createServerClient } from '@/lib/supabase/server'
 
 function getSupabaseAdmin() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY
-
-  if (!url || !serviceRoleKey) {
-    throw new Error('Missing Supabase configuration for admin client')
-  }
-
+  if (!url || !serviceRoleKey) throw new Error('Missing Supabase admin configuration')
   return createClient(url, serviceRoleKey, {
     auth: { autoRefreshToken: false, persistSession: false },
   })
@@ -17,26 +12,17 @@ function getSupabaseAdmin() {
 
 export async function POST(request: Request) {
   try {
-    // Verify caller is authenticated
-    const supabase = await createServerClient()
-    const { data: { user: currentUser } } = await supabase.auth.getUser()
+    // Session is stored in localStorage (not cookies), so auth is verified via Bearer token.
+    const supabaseAdmin = getSupabaseAdmin()
+    const token = request.headers.get('authorization')?.replace('Bearer ', '').trim()
 
-    if (!currentUser) {
+    if (!token) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    // Only employees (submitting their own leave) and admins/managers should reach this.
-    // Verify the caller is actually authenticated — role check happens implicitly via
-    // the leave submission flow, but we block unauthenticated callers above.
-    // Extra safety: confirm the caller exists in employees.
-    const { data: callerProfile } = await supabase
-      .from('employees' as any)
-      .select('role')
-      .eq('id', currentUser.id)
-      .single()
-
-    if (!callerProfile) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    const { data: { user: currentUser }, error: authError } = await supabaseAdmin.auth.getUser(token)
+    if (authError || !currentUser) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
     const body = await request.json()
@@ -48,26 +34,38 @@ export async function POST(request: Request) {
       endDate,
       daysRequested,
       targetRoles,
+      targetUserIds,
       title: titleOverride,
       message: messageOverride,
+      notificationType,
     } = body
 
-    if (!leaveRequestId || !employeeName) {
-      return NextResponse.json({ error: 'Missing required fields' }, { status: 400 })
+    if (!leaveRequestId) {
+      return NextResponse.json({ error: 'Missing leaveRequestId' }, { status: 400 })
     }
 
-    const supabaseAdmin = getSupabaseAdmin()
+    // Collect recipient IDs — explicit user IDs take priority, else look up by role
+    let recipientIds: string[] = []
 
-    const roles = Array.isArray(targetRoles) && targetRoles.length > 0
-      ? targetRoles
-      : ['hr_manager', 'system_admin', 'line_manager']
+    if (Array.isArray(targetUserIds) && targetUserIds.length > 0) {
+      recipientIds = targetUserIds
+    } else {
+      const roles = Array.isArray(targetRoles) && targetRoles.length > 0
+        ? targetRoles
+        : ['hr_manager', 'system_admin', 'line_manager']
 
-    const { data: reviewers, error: profilesError } = await supabaseAdmin
-      .from('employees' as any)
-      .select('id')
-      .in('role', roles)
+      const { data: roleUsers, error: profilesError } = await supabaseAdmin
+        .from('employees' as any)
+        .select('id')
+        .in('role', roles)
 
-    if (profilesError || !reviewers || reviewers.length === 0) {
+      if (profilesError || !roleUsers || roleUsers.length === 0) {
+        return NextResponse.json({ success: true, notified: 0 })
+      }
+      recipientIds = (roleUsers as any[]).map((r: any) => r.id as string)
+    }
+
+    if (recipientIds.length === 0) {
       return NextResponse.json({ success: true, notified: 0 })
     }
 
@@ -75,11 +73,11 @@ export async function POST(request: Request) {
     const notifMessage = messageOverride ||
       `${employeeName} submitted a ${leaveTypeName} request for ${daysRequested} day(s) (${startDate} – ${endDate}).`
 
-    const notifications = reviewers.map(reviewer => ({
-      user_id: reviewer.id,
+    const notifications = recipientIds.map(id => ({
+      user_id: id,
       title: notifTitle,
       message: notifMessage,
-      type: 'leave_request',
+      type: notificationType || 'leave_request',
       reference_id: leaveRequestId,
       read: false,
     }))
@@ -93,7 +91,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: insertError.message }, { status: 500 })
     }
 
-    return NextResponse.json({ success: true, notified: reviewers.length })
+    return NextResponse.json({ success: true, notified: recipientIds.length })
   } catch (err) {
     console.error('Unexpected error creating notifications:', err)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })

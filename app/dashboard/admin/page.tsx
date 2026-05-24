@@ -27,8 +27,9 @@ import {
   type LeaveType,
 } from "@/lib/supabase/leave-service"
 import { Switch } from "@/components/ui/switch"
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
-import { Users, CheckCircle2, Clock, TrendingUp, Edit, Search, ChevronDown, ChevronRight, UserIcon, UserPlus, Trash2, CalendarDays, Plus, Building2, GraduationCap, X, Settings2, GitBranch, FileCheck, ArrowRight } from "lucide-react"
+import { Users, CheckCircle2, Clock, TrendingUp, Edit, Search, ChevronDown, ChevronRight, UserIcon, UserPlus, Trash2, CalendarDays, Plus, Building2, GraduationCap, X, Settings2, GitBranch, FileCheck, ArrowRight, BookOpen, Archive, RotateCcw, Eye, Upload } from "lucide-react"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { format } from "date-fns"
 import { Badge } from "@/components/ui/badge"
@@ -41,6 +42,14 @@ import {
 import { DEMO_EMPLOYEES } from "@/lib/demo-data"
 import { getOrgConfig, saveOrgConfig, type OrgConfig } from "@/lib/org-config"
 import { apiFetch } from "@/lib/api-fetch"
+import { getAllPolicies, archivePolicy, restorePolicy, getPolicyAcknowledgements, type HRPolicy, type PolicyAcknowledgement } from "@/lib/supabase/policy-service"
+import { UploadPolicyDialog } from "@/components/upload-policy-dialog"
+import { UploadNewVersionDialog } from "@/components/upload-new-version-dialog"
+import { writeAdminAudit, getAdminAuditLog, ADMIN_AUDIT_LABELS, type AdminAuditEntry } from "@/lib/supabase/admin-audit-service"
+import { ScrollText, Megaphone } from "lucide-react"
+import { getAllAnnouncements, publishAnnouncement, deleteAnnouncement, type Announcement } from "@/lib/supabase/announcement-service"
+import { CreateAnnouncementDialog } from "@/components/create-announcement-dialog"
+import { createClient } from "@/lib/supabase/client"
 
 export default function AdminDashboardPage() {
   const { user, isLoading } = useAuth()
@@ -76,6 +85,21 @@ export default function AdminDashboardPage() {
   const [isRunningAccrual, setIsRunningAccrual] = useState(false)
   const [accrualResult, setAccrualResult] = useState<string | null>(null)
 
+  const [hrPolicies, setHrPolicies] = useState<HRPolicy[]>([])
+  const [isUploadPolicyOpen, setIsUploadPolicyOpen] = useState(false)
+  const [togglingPolicyId, setTogglingPolicyId] = useState<string | null>(null)
+  const [ackDrawer, setAckDrawer] = useState<{ policy: HRPolicy; acks: PolicyAcknowledgement[]; loading: boolean } | null>(null)
+  const [newVersionPolicy, setNewVersionPolicy] = useState<HRPolicy | null>(null)
+
+  const [adminAuditLog, setAdminAuditLog] = useState<AdminAuditEntry[]>([])
+  const [isLoadingAudit, setIsLoadingAudit] = useState(false)
+
+  const [announcements, setAnnouncements] = useState<Announcement[]>([])
+  const [isCreateAnnouncementOpen, setIsCreateAnnouncementOpen] = useState(false)
+  const [editingAnnouncement, setEditingAnnouncement] = useState<Announcement | null>(null)
+  const [publishingAnnId, setPublishingAnnId] = useState<string | null>(null)
+  const [deletingAnnId, setDeletingAnnId] = useState<string | null>(null)
+
   const fetchData = useCallback(async () => {
     setIsLoadingData(true)
     try {
@@ -84,14 +108,20 @@ export default function AdminDashboardPage() {
         setEmployees(DEMO_EMPLOYEES)
         return
       }
-      const [employeesData, requestsData, balancesData] = await Promise.all([
+      const [employeesData, requestsData, balancesData, leaveTypesData, policiesData, announcementsData] = await Promise.all([
         getAllEmployees(),
         getAllLeaveRequests(),
         getAllLeaveBalances(),
+        getLeaveTypes(),
+        getAllPolicies(),
+        getAllAnnouncements(),
       ])
       setEmployees(employeesData)
       setAllRequests(requestsData)
       setLeaveBalances(balancesData)
+      setLeaveTypes(leaveTypesData)
+      setHrPolicies(policiesData)
+      setAnnouncements(announcementsData)
     } catch {
       setEmployees([])
       setAllRequests([])
@@ -111,6 +141,7 @@ export default function AdminDashboardPage() {
     setIsAddingHoliday(true)
     const result = await addPublicHoliday(newHolidayName.trim(), newHolidayDate)
     if (result.success) {
+      if (user) void writeAdminAudit({ actorId: user.id, actorName: `${user.firstName} ${user.lastName}`, action: 'holiday_created', entityType: 'public_holiday', entityLabel: `${newHolidayName.trim()} (${newHolidayDate})` })
       setNewHolidayName("")
       setNewHolidayDate("")
       await fetchHolidays()
@@ -121,9 +152,11 @@ export default function AdminDashboardPage() {
   }
 
   const handleDeleteHoliday = async (id: string) => {
+    const holidayName = publicHolidays.find(h => h.id === id)?.name ?? id
     setIsDeletingHoliday(id)
     const result = await deletePublicHoliday(id)
     if (result.success) {
+      if (user) void writeAdminAudit({ actorId: user.id, actorName: `${user.firstName} ${user.lastName}`, action: 'holiday_deleted', entityType: 'public_holiday', entityId: id, entityLabel: holidayName })
       await fetchHolidays()
     } else {
       alert(`Failed to delete holiday: ${result.error}`)
@@ -139,6 +172,7 @@ export default function AdminDashboardPage() {
       const data = await res.json()
       if (data.success) {
         setAccrualResult(`Done — ${data.processed} employee(s) accrued +1.25 days, ${data.skipped} skipped (already ran this month or at cap).`)
+        if (user) void writeAdminAudit({ actorId: user.id, actorName: `${user.firstName} ${user.lastName}`, action: 'leave_accrual_run', entityType: 'system', entityLabel: `${data.processed} processed, ${data.skipped} skipped` })
         await fetchData()
       } else {
         setAccrualResult(`Error: ${data.error}`)
@@ -164,7 +198,6 @@ export default function AdminDashboardPage() {
       fetchData()
       fetchHolidays()
       setOrgConfig(getOrgConfig())
-      getLeaveTypes().then(setLeaveTypes)
     }
   }, [user, fetchData, fetchHolidays])
 
@@ -206,20 +239,48 @@ export default function AdminDashboardPage() {
 
   const handleUpdateLeaveType = async (id: string, config: { requiresManagerApproval?: boolean; requiresDocument?: boolean; defaultDays?: number }) => {
     setSavingLeaveTypeId(id)
+    const lt = leaveTypes.find(l => l.id === id)
     // Optimistic update
-    setLeaveTypes(prev => prev.map(lt => lt.id === id ? {
-      ...lt,
+    setLeaveTypes(prev => prev.map(l => l.id === id ? {
+      ...l,
       ...(config.requiresManagerApproval !== undefined && { requiresManagerApproval: config.requiresManagerApproval }),
       ...(config.requiresDocument !== undefined && { requiresDocument: config.requiresDocument }),
       ...(config.defaultDays !== undefined && { defaultDays: config.defaultDays }),
-    } : lt))
+    } : l))
     const result = await updateLeaveType(id, config)
-    if (!result.success) {
-      // Revert on error
+    if (result.success) {
+      if (user && lt) {
+        const changes = []
+        if (config.requiresManagerApproval !== undefined) changes.push({ field: 'requiresManagerApproval', label: 'Requires Manager Approval', previousValue: String(lt.requiresManagerApproval), newValue: String(config.requiresManagerApproval) })
+        if (config.requiresDocument !== undefined) changes.push({ field: 'requiresDocument', label: 'Requires Document', previousValue: String(lt.requiresDocument), newValue: String(config.requiresDocument) })
+        if (config.defaultDays !== undefined) changes.push({ field: 'defaultDays', label: 'Default Days', previousValue: String(lt.defaultDays), newValue: String(config.defaultDays) })
+        void writeAdminAudit({ actorId: user.id, actorName: `${user.firstName} ${user.lastName}`, action: 'leave_type_updated', entityType: 'leave_type', entityId: id, entityLabel: lt.name, changes })
+      }
+    } else {
       getLeaveTypes().then(setLeaveTypes)
       alert(`Failed to update: ${result.error}`)
     }
     setSavingLeaveTypeId(null)
+  }
+
+  const handleViewAcknowledgements = async (policy: HRPolicy) => {
+    setAckDrawer({ policy, acks: [], loading: true })
+    const acks = await getPolicyAcknowledgements(policy.id)
+    setAckDrawer({ policy, acks, loading: false })
+  }
+
+  const handleTogglePolicyArchive = async (policy: HRPolicy) => {
+    setTogglingPolicyId(policy.id)
+    const fn = policy.isArchived ? restorePolicy : archivePolicy
+    const result = await fn(policy.id)
+    if (result.success) {
+      if (user) void writeAdminAudit({ actorId: user.id, actorName: `${user.firstName} ${user.lastName}`, action: policy.isArchived ? 'policy_restored' : 'policy_archived', entityType: 'hr_policy', entityId: policy.id, entityLabel: `${policy.title} v${policy.version}` })
+      setHrPolicies(prev => prev.map(p => p.id === policy.id
+        ? { ...p, isArchived: !policy.isArchived, isActive: policy.isArchived }
+        : p
+      ))
+    }
+    setTogglingPolicyId(null)
   }
 
   const handleEditEmployee = (employee: Employee) => {
@@ -250,6 +311,7 @@ export default function AdminDashboardPage() {
       const data = await response.json()
 
       if (response.ok && data.success) {
+        if (user) void writeAdminAudit({ actorId: user.id, actorName: `${user.firstName} ${user.lastName}`, action: 'employee_deleted', entityType: 'employee', entityId: deletingEmployee.id, entityLabel: `${deletingEmployee.firstName} ${deletingEmployee.lastName} (${deletingEmployee.employeeNumber ?? deletingEmployee.id})` })
         await fetchData()
         setDeletingEmployee(null)
       } else {
@@ -263,9 +325,18 @@ export default function AdminDashboardPage() {
 
   const handleSaveBalance = async (balanceId: string, newTotalDays: number) => {
     setIsSaving(true)
+    const bal = leaveBalances.find(b => b.id === balanceId)
     const result = await updateLeaveBalance(balanceId, newTotalDays)
 
     if (result.success) {
+      if (user && bal) {
+        void writeAdminAudit({
+          actorId: user.id, actorName: `${user.firstName} ${user.lastName}`,
+          action: 'balance_adjusted', entityType: 'leave_balance', entityId: balanceId,
+          entityLabel: `${bal.employee.firstName} ${bal.employee.lastName} — ${bal.leaveTypeName} ${bal.year}`,
+          changes: [{ field: 'totalDays', label: 'Total Days', previousValue: String(bal.totalDays), newValue: String(newTotalDays) }],
+        })
+      }
       await fetchData()
       setEditingBalance(null)
     } else {
@@ -392,6 +463,31 @@ export default function AdminDashboardPage() {
                   Workflow
                 </TabsTrigger>
                 <TabsTrigger value="compliance">BCEA Compliance</TabsTrigger>
+                <TabsTrigger value="policies">
+                  <BookOpen className="w-3.5 h-3.5 mr-1.5" />
+                  Policies
+                </TabsTrigger>
+                <TabsTrigger value="announcements">
+                  <Megaphone className="w-3.5 h-3.5 mr-1.5" />
+                  Announcements
+                  {announcements.length > 0 && (
+                    <span className="ml-1.5 text-xs text-muted-foreground">({announcements.length})</span>
+                  )}
+                </TabsTrigger>
+                <TabsTrigger value="audit_log" onClick={async () => {
+                  if (adminAuditLog.length === 0) {
+                    setIsLoadingAudit(true)
+                    const log = await getAdminAuditLog(100)
+                    setAdminAuditLog(log)
+                    setIsLoadingAudit(false)
+                  }
+                }}>
+                  <ScrollText className="w-3.5 h-3.5 mr-1.5" />
+                  Audit Log
+                  {adminAuditLog.length > 0 && (
+                    <span className="ml-1.5 text-xs text-muted-foreground">({adminAuditLog.length})</span>
+                  )}
+                </TabsTrigger>
               </TabsList>
 
               {/* Employees Tab */}
@@ -985,10 +1081,345 @@ export default function AdminDashboardPage() {
                   </Card>
                 </div>
               </TabsContent>
+
+              {/* Policies Tab */}
+              <TabsContent value="policies">
+                <Card>
+                  <CardHeader className="flex flex-row items-center justify-between">
+                    <div>
+                      <CardTitle>HR Policies &amp; Documents</CardTitle>
+                      <p className="text-sm text-muted-foreground mt-1">
+                        {hrPolicies.filter(p => !p.isArchived).length} active · {hrPolicies.filter(p => p.isArchived).length} archived
+                      </p>
+                    </div>
+                    <Button onClick={() => setIsUploadPolicyOpen(true)}>
+                      <Upload className="w-4 h-4 mr-2" />
+                      Upload Document
+                    </Button>
+                  </CardHeader>
+                  <CardContent>
+                    {hrPolicies.length === 0 ? (
+                      <div className="py-12 text-center text-muted-foreground">
+                        <BookOpen className="w-10 h-10 mx-auto mb-3 opacity-30" />
+                        <p>No policies yet. Upload your first document above.</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-1">
+                        <div className="grid grid-cols-[1fr_auto_auto_auto_auto] gap-x-4 px-3 py-2 text-xs font-medium text-muted-foreground uppercase tracking-wide border-b">
+                          <span>Document</span>
+                          <span>Category</span>
+                          <span>Visibility</span>
+                          <span className="text-right">Acknowledged</span>
+                          <span />
+                        </div>
+                        {hrPolicies.map(policy => (
+                          <div
+                            key={policy.id}
+                            className={`grid grid-cols-[1fr_auto_auto_auto_auto] gap-x-4 items-center px-3 py-3 rounded-lg text-sm hover:bg-muted/40 transition-colors ${policy.isArchived ? "opacity-50" : ""}`}
+                          >
+
+                            <div>
+                              <p className="font-medium line-clamp-1">{policy.title}</p>
+                              {policy.description && (
+                                <p className="text-xs text-muted-foreground line-clamp-1 mt-0.5">{policy.description}</p>
+                              )}
+                            </div>
+                            <Badge variant="outline" className="text-xs">{policy.category}</Badge>
+                            <Badge
+                              variant="outline"
+                              className={`text-xs ${
+                                policy.visibility === "all" ? "bg-emerald-50 text-emerald-700 border-emerald-200" :
+                                policy.visibility === "management" ? "bg-blue-50 text-blue-700 border-blue-200" :
+                                "bg-purple-50 text-purple-700 border-purple-200"
+                              }`}
+                            >
+                              {policy.visibility === "all" ? "All Staff" : policy.visibility === "management" ? "Management" : "HR Only"}
+                            </Badge>
+                            <button
+                              className={`text-xs text-right transition-colors ${(policy.acknowledgementCount ?? 0) > 0 ? "text-primary font-semibold underline underline-offset-2 cursor-pointer hover:text-primary/80" : "text-muted-foreground cursor-default"}`}
+                              onClick={() => (policy.acknowledgementCount ?? 0) > 0 && handleViewAcknowledgements(policy)}
+                            >
+                              {policy.acknowledgementCount ?? 0}
+                            </button>
+                            <div className="flex items-center gap-1">
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-7 px-2"
+                                title="View document"
+                                onClick={() => window.open(policy.fileUrl, "_blank", "noopener,noreferrer")}
+                              >
+                                <Eye className="w-3.5 h-3.5" />
+                              </Button>
+                              {!policy.isArchived && (
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  className="h-7 px-2 text-muted-foreground hover:text-primary"
+                                  title={`Upload v${policy.version + 1}`}
+                                  onClick={() => setNewVersionPolicy(policy)}
+                                >
+                                  <Upload className="w-3.5 h-3.5" />
+                                </Button>
+                              )}
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className={`h-7 px-2 ${policy.isArchived ? "text-emerald-600 hover:text-emerald-700" : "text-muted-foreground"}`}
+                                title={policy.isArchived ? "Restore" : "Archive"}
+                                onClick={() => handleTogglePolicyArchive(policy)}
+                                disabled={togglingPolicyId === policy.id}
+                              >
+                                {policy.isArchived
+                                  ? <RotateCcw className="w-3.5 h-3.5" />
+                                  : <Archive className="w-3.5 h-3.5" />
+                                }
+                              </Button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              </TabsContent>
+
+              {/* Announcements Tab */}
+              <TabsContent value="announcements">
+                <Card>
+                  <CardHeader className="flex flex-row items-center justify-between">
+                    <div>
+                      <CardTitle className="flex items-center gap-2">
+                        <Megaphone className="w-5 h-5" />
+                        Announcements
+                      </CardTitle>
+                      <p className="text-sm text-muted-foreground mt-1">Create and manage company-wide or targeted announcements</p>
+                    </div>
+                    <Button onClick={() => setIsCreateAnnouncementOpen(true)}>
+                      <Plus className="w-4 h-4 mr-2" />
+                      New Announcement
+                    </Button>
+                  </CardHeader>
+                  <CardContent>
+                    {announcements.length === 0 ? (
+                      <div className="py-10 text-center text-muted-foreground text-sm">
+                        No announcements yet. Create one to notify your team.
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        {announcements.map(ann => {
+                          const now = new Date().toISOString()
+                          const isExpired = !!ann.expiresAt && ann.expiresAt < now
+                          const isScheduled = !ann.isPublished && !!ann.scheduledAt
+                          const isDraft = !ann.isPublished && !ann.scheduledAt
+                          const statusLabel = isExpired ? 'Expired' : ann.isPublished ? 'Live' : isScheduled ? 'Scheduled' : 'Draft'
+                          const statusClass = isExpired ? 'bg-slate-100 text-slate-600'
+                            : ann.isPublished ? 'bg-emerald-100 text-emerald-800'
+                            : isScheduled ? 'bg-blue-100 text-blue-800'
+                            : 'bg-amber-100 text-amber-800'
+                          return (
+                            <div key={ann.id} className="flex items-center gap-4 p-3 rounded-lg border hover:bg-muted/30 transition-colors">
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2 mb-0.5">
+                                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${statusClass}`}>{statusLabel}</span>
+                                  <span className="text-[10px] text-muted-foreground capitalize">{ann.category}</span>
+                                  <span className="text-[10px] text-muted-foreground">·</span>
+                                  <span className="text-[10px] text-muted-foreground">
+                                    {ann.targetType === 'all' ? 'All employees' : `By ${ann.targetType}: ${ann.targetValues.join(', ')}`}
+                                  </span>
+                                </div>
+                                <p className="text-sm font-medium truncate">{ann.title}</p>
+                                <p className="text-xs text-muted-foreground truncate mt-0.5">{ann.body.slice(0, 100)}{ann.body.length > 100 ? '…' : ''}</p>
+                              </div>
+                              <div className="flex items-center gap-2 shrink-0">
+                                {!ann.isPublished && (
+                                  <Button
+                                    size="sm" variant="outline"
+                                    disabled={publishingAnnId === ann.id}
+                                    onClick={async () => {
+                                      setPublishingAnnId(ann.id)
+                                      const supabase = createClient()
+                                      const { data: { session } } = await supabase.auth.getSession()
+                                      await publishAnnouncement(ann.id, session?.access_token ?? "")
+                                      await fetchData()
+                                      setPublishingAnnId(null)
+                                    }}
+                                    className="text-xs h-8"
+                                  >
+                                    {publishingAnnId === ann.id ? 'Publishing…' : 'Publish Now'}
+                                  </Button>
+                                )}
+                                <Button
+                                  size="sm" variant="ghost"
+                                  onClick={() => setEditingAnnouncement(ann)}
+                                  className="text-xs h-8"
+                                >
+                                  Edit
+                                </Button>
+                                <Button
+                                  size="sm" variant="ghost"
+                                  disabled={deletingAnnId === ann.id}
+                                  onClick={async () => {
+                                    if (!confirm(`Delete "${ann.title}"?`)) return
+                                    setDeletingAnnId(ann.id)
+                                    await deleteAnnouncement(ann.id)
+                                    await fetchData()
+                                    setDeletingAnnId(null)
+                                  }}
+                                  className="text-xs h-8 text-red-500 hover:text-red-600 hover:bg-red-50"
+                                >
+                                  Delete
+                                </Button>
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              </TabsContent>
+
+              {/* Audit Log Tab */}
+              <TabsContent value="audit_log">
+                <Card>
+                  <CardHeader className="flex flex-row items-center justify-between">
+                    <div>
+                      <CardTitle className="flex items-center gap-2">
+                        <ScrollText className="w-5 h-5" />
+                        Admin Audit Log
+                      </CardTitle>
+                      <p className="text-sm text-muted-foreground mt-1">
+                        All administrative actions — balance changes, policy management, system events
+                      </p>
+                    </div>
+                    <Button variant="outline" size="sm" onClick={async () => {
+                      setIsLoadingAudit(true)
+                      const log = await getAdminAuditLog(100)
+                      setAdminAuditLog(log)
+                      setIsLoadingAudit(false)
+                    }}>
+                      Refresh
+                    </Button>
+                  </CardHeader>
+                  <CardContent>
+                    {isLoadingAudit ? (
+                      <div className="py-10 text-center text-muted-foreground text-sm">Loading audit log…</div>
+                    ) : adminAuditLog.length === 0 ? (
+                      <div className="py-10 text-center text-muted-foreground text-sm">
+                        No admin actions recorded yet. Actions will appear here once you make changes.
+                      </div>
+                    ) : (
+                      <div className="divide-y">
+                        {adminAuditLog.map(entry => (
+                          <div key={entry.id} className="py-3.5 flex items-start gap-4">
+                            {/* Icon */}
+                            <div className="shrink-0 mt-0.5 w-8 h-8 rounded-full bg-muted flex items-center justify-center">
+                              <ScrollText className="w-3.5 h-3.5 text-muted-foreground" />
+                            </div>
+                            {/* Content */}
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-start justify-between gap-3">
+                                <div>
+                                  <p className="text-sm font-medium">
+                                    {ADMIN_AUDIT_LABELS[entry.action] ?? entry.action}
+                                    {entry.entityLabel && (
+                                      <span className="font-normal text-muted-foreground"> — {entry.entityLabel}</span>
+                                    )}
+                                  </p>
+                                  <p className="text-xs text-muted-foreground mt-0.5">by {entry.actorName}</p>
+                                </div>
+                                <span className="shrink-0 text-xs text-muted-foreground whitespace-nowrap">
+                                  {new Date(entry.timestamp).toLocaleDateString("en-ZA", { day: "2-digit", month: "short", year: "numeric" })}
+                                  {" · "}
+                                  {new Date(entry.timestamp).toLocaleTimeString("en-ZA", { hour: "2-digit", minute: "2-digit" })}
+                                </span>
+                              </div>
+                              {entry.changes.length > 0 && (
+                                <div className="mt-1.5 flex flex-wrap gap-1.5">
+                                  {entry.changes.map((c, i) => (
+                                    <span key={i} className="inline-flex items-center gap-1 text-xs bg-muted px-2 py-0.5 rounded">
+                                      <span className="text-muted-foreground">{c.label}:</span>
+                                      <span className="line-through text-red-600/70">{c.previousValue}</span>
+                                      <ArrowRight className="w-2.5 h-2.5 text-muted-foreground" />
+                                      <span className="text-emerald-700">{c.newValue}</span>
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              </TabsContent>
             </Tabs>
           </>
         )}
       </main>
+
+      {/* Acknowledgements drill-down dialog */}
+      <Dialog open={!!ackDrawer} onOpenChange={open => !open && setAckDrawer(null)}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="text-base leading-snug">{ackDrawer?.policy.title}</DialogTitle>
+            <p className="text-sm text-muted-foreground">Acknowledgement log — who received this document and when</p>
+          </DialogHeader>
+          {ackDrawer?.loading ? (
+            <div className="py-8 text-center text-muted-foreground text-sm">Loading…</div>
+          ) : ackDrawer?.acks.length === 0 ? (
+            <div className="py-8 text-center text-muted-foreground text-sm">No acknowledgements recorded yet.</div>
+          ) : (
+            <div className="space-y-1 max-h-80 overflow-y-auto">
+              <div className="grid grid-cols-[1fr_auto] gap-4 px-3 py-2 text-xs font-medium text-muted-foreground uppercase tracking-wide border-b sticky top-0 bg-background">
+                <span>Employee</span>
+                <span>Acknowledged At</span>
+              </div>
+              {ackDrawer?.acks.map(ack => (
+                <div key={ack.id} className="grid grid-cols-[1fr_auto] gap-4 items-center px-3 py-2.5 rounded hover:bg-muted/40 text-sm">
+                  <div>
+                    <p className="font-medium">{ack.employeeName}</p>
+                    {ack.employeeNumber && <p className="text-xs text-muted-foreground">{ack.employeeNumber}</p>}
+                  </div>
+                  <div className="text-right text-xs text-muted-foreground whitespace-nowrap">
+                    <p>{new Date(ack.acknowledgedAt).toLocaleDateString("en-ZA", { day: "2-digit", month: "short", year: "numeric" })}</p>
+                    <p>{new Date(ack.acknowledgedAt).toLocaleTimeString("en-ZA", { hour: "2-digit", minute: "2-digit" })}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <UploadNewVersionDialog
+        policy={newVersionPolicy}
+        onClose={() => setNewVersionPolicy(null)}
+        onSuccess={() => { setNewVersionPolicy(null); fetchData() }}
+        uploaderId={user?.id ?? ""}
+        uploaderName={user ? `${user.firstName} ${user.lastName}` : "HR"}
+      />
+
+      <UploadPolicyDialog
+        isOpen={isUploadPolicyOpen}
+        onClose={() => setIsUploadPolicyOpen(false)}
+        onSuccess={() => { setIsUploadPolicyOpen(false); fetchData() }}
+        uploaderId={user?.id ?? ""}
+        uploaderName={user ? `${user.firstName} ${user.lastName}` : "HR"}
+      />
+
+      <CreateAnnouncementDialog
+        isOpen={isCreateAnnouncementOpen || !!editingAnnouncement}
+        onClose={() => { setIsCreateAnnouncementOpen(false); setEditingAnnouncement(null) }}
+        onSuccess={() => { setIsCreateAnnouncementOpen(false); setEditingAnnouncement(null); fetchData() }}
+        creatorId={user?.id ?? ""}
+        creatorName={user ? `${user.firstName} ${user.lastName}` : "HR"}
+        departments={orgConfig.departments}
+        grades={orgConfig.grades}
+        editing={editingAnnouncement}
+      />
 
       {editingBalance && (
         <EditBalanceDialog
