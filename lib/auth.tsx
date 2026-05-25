@@ -101,7 +101,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .eq("id", userId)
       .single()
     if (error || !data) return null
-    return mapEmployee(data as unknown as Record<string, unknown>)
+
+    const employee = mapEmployee(data as unknown as Record<string, unknown>)
+
+    // id_number and date_of_birth are restricted at column level — fetch own PII via secure RPC
+    const { data: pii } = await supabase.rpc("get_my_employee_pii")
+    if (pii && pii.length > 0) {
+      employee.idNumber = (pii[0] as { id_number: string | null }).id_number
+      employee.dateOfBirth = (pii[0] as { date_of_birth: string | null }).date_of_birth
+    }
+
+    return employee
   }, [])
 
   useEffect(() => {
