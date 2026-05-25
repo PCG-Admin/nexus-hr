@@ -8,7 +8,15 @@ function getSupabaseAdmin() {
   return createClient(url, key, { auth: { autoRefreshToken: false, persistSession: false } })
 }
 
-export async function POST() {
+export async function POST(request: Request) {
+  const authHeader = request.headers.get('authorization')
+  const cronSecret = process.env.CRON_SECRET
+  if (process.env.NODE_ENV === 'production' && cronSecret) {
+    if (authHeader !== `Bearer ${cronSecret}`) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+  }
+
   try {
     const supabase = getSupabaseAdmin()
     const now = new Date().toISOString()

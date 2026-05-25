@@ -69,7 +69,8 @@ const ROLE_COOKIE = "nexus-role"
 const COOKIE_MAX_AGE = 60 * 60 * 24 * 7 // 7 days
 
 function setRoleCookie(role: string) {
-  document.cookie = `${ROLE_COOKIE}=${role}; path=/; max-age=${COOKIE_MAX_AGE}; SameSite=Lax`
+  const secure = window.location.protocol === 'https:' ? '; Secure' : ''
+  document.cookie = `${ROLE_COOKIE}=${role}; path=/; max-age=${COOKIE_MAX_AGE}; SameSite=Lax${secure}`
 }
 
 function clearRoleCookie() {
@@ -115,15 +116,39 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     let loadedUserId: string | null = null
 
-    async function loadUser(userId: string) {
-      const employee = await fetchEmployee(userId)
-      if (mounted && employee) {
+    async function loadUser(userId: string, attempt = 1) {
+      const MAX_ATTEMPTS = 3
+      let timedOut = false
+
+      const employee = await Promise.race([
+        fetchEmployee(userId),
+        new Promise<null>(resolve =>
+          setTimeout(() => { timedOut = true; resolve(null) }, 8000)
+        ),
+      ])
+
+      if (!mounted) return
+
+      if (employee) {
         setUser(employee)
         setRoleCookie(employee.role)
         loadedUserId = userId
-      } else if (mounted) {
+        return
+      }
+
+      if (timedOut && attempt < MAX_ATTEMPTS) {
+        // Network too slow — retry before giving up
+        console.warn(`[NEXUS] fetchEmployee timeout, retrying (attempt ${attempt}/${MAX_ATTEMPTS})`)
+        await new Promise(r => setTimeout(r, 2000 * attempt))
+        if (mounted) await loadUser(userId, attempt + 1)
+        return
+      }
+
+      if (!timedOut) {
+        // Definitive null response — employee record genuinely not found
         clearStaleSession()
       }
+      // timedOut + max retries exhausted — session stays intact, user stays null
     }
 
     async function init() {

@@ -18,7 +18,13 @@
       "Bash(sed 's/ \\(.*//')",
       "Bash(xargs -I {} basename {})",
       "Bash(Get-ChildItem -Path \"c:\\\\PCG PROJECTS 2026\\\\PCG Projects\\\\nexus-hr\" -Directory)",
-      "Bash(Select-Object Name)"
+      "Bash(Select-Object Name)",
+      "PowerShell(Get-ChildItem -Path \"c:\\\\PCG PROJECTS 2026\\\\PCG Projects\\\\nexus-hr\" -Force | Select-Object Name, @{Name=\"Type\";Expression={if\\($_.PSIsContainer\\){\"Directory\"}else{\"File\"}}} | Format-Table -AutoSize)",
+      "Bash(Get-ChildItem -Path \"c:\\\\PCG PROJECTS 2026\\\\PCG Projects\\\\nexus-hr\\\\supabase\\\\migrations\" -Name)",
+      "Bash(Sort-Object)",
+      "Bash(Select-Object -Last 5)",
+      "Bash(powershell -Command \"[System.Convert]::ToBase64String\\([System.Security.Cryptography.RandomNumberGenerator]::GetBytes\\(32\\)\\).Replace\\('+','x'\\).Replace\\('/','y'\\).Replace\\('=',''\\)\")",
+      "PowerShell($rng = New-Object System.Security.Cryptography.RNGCryptoServiceProvider; $bytes = New-Object byte[] 32; $rng.GetBytes\\($bytes\\); [System.Convert]::ToBase64String\\($bytes\\) -replace '[+/=]', 'x')"
     ],
     "additionalDirectories": [
       "c:\\PCG PROJECTS 2026\\PCG Projects\\nexus hr\\leave-platform\\app\\preview"
