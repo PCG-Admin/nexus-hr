@@ -51,7 +51,7 @@ export function UploadNewVersionDialog({
 
   return (
     <Dialog open={!!policy} onOpenChange={handleClose}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>Upload New Version</DialogTitle>
         </DialogHeader>
@@ -59,7 +59,7 @@ export function UploadNewVersionDialog({
         <div className="space-y-4 py-2">
           {/* Document summary */}
           <div className="rounded-lg border bg-muted/30 px-4 py-3 space-y-1">
-            <p className="text-sm font-medium line-clamp-1">{policy.title}</p>
+            <p className="text-sm font-medium">{policy.title}</p>
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
               <Badge variant="outline" className="text-xs">{policy.category}</Badge>
               <span className="flex items-center gap-1.5">
@@ -90,7 +90,7 @@ export function UploadNewVersionDialog({
               <div className="flex items-center justify-center gap-3">
                 <FileText className="w-6 h-6 text-primary" />
                 <div className="text-left">
-                  <p className="text-sm font-medium truncate max-w-xs">{file.name}</p>
+                  <p className="text-sm font-medium truncate max-w-sm">{file.name}</p>
                   <p className="text-xs text-muted-foreground">{(file.size / 1024).toFixed(0)} KB</p>
                 </div>
                 <Button
