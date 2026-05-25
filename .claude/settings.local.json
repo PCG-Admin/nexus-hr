@@ -10,7 +10,15 @@
       "PowerShell(Get-ChildItem -Path \"c:\\\\PCG PROJECTS 2026\\\\PCG Projects\\\\nexus hr\\\\leave-platform\" -Recurse -File | Where-Object { $_.Extension -eq '.sql' } | Select-Object FullName)",
       "PowerShell(Get-ChildItem -Path \"c:\\\\PCG PROJECTS 2026\\\\PCG Projects\\\\nexus hr\\\\leave-platform\" -Recurse -Directory | Where-Object { $_.Name -eq 'supabase' -or $_.Name -eq 'migrations' -or $_.Name -eq 'database' } | Select-Object FullName)",
       "Bash(npx tsc *)",
-      "Bash(npx next *)"
+      "Bash(npx next *)",
+      "Bash(python -c ' *)",
+      "Bash(pip install *)",
+      "Bash(Get-ChildItem -Path \"c:\\\\PCG PROJECTS 2026\\\\PCG Projects\\\\nexus-hr\" -Force)",
+      "Bash(Select-Object Name, FullName)",
+      "Bash(sed 's/ \\(.*//')",
+      "Bash(xargs -I {} basename {})",
+      "Bash(Get-ChildItem -Path \"c:\\\\PCG PROJECTS 2026\\\\PCG Projects\\\\nexus-hr\" -Directory)",
+      "Bash(Select-Object Name)"
     ],
     "additionalDirectories": [
       "c:\\PCG PROJECTS 2026\\PCG Projects\\nexus hr\\leave-platform\\app\\preview"

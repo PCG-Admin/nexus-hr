@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from "react"
 import { createClient } from "@/lib/supabase/client"
+import { initDiagnostics } from "@/lib/diagnostics"
 
 export type UserRole = "employee" | "line_manager" | "hr_manager" | "executive" | "system_admin"
 
@@ -104,6 +105,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const supabase = createClient()
+    initDiagnostics()
     let mounted = true
 
     function clearStaleSession() {
@@ -111,11 +113,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       clearRoleCookie()
     }
 
+    let loadedUserId: string | null = null
+
     async function loadUser(userId: string) {
       const employee = await fetchEmployee(userId)
       if (mounted && employee) {
         setUser(employee)
         setRoleCookie(employee.role)
+        loadedUserId = userId
       } else if (mounted) {
         clearStaleSession()
       }
@@ -144,6 +149,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         ])
 
         if (!mounted) return
+
+        if (error?.message === 'timeout') {
+          // Network timed out — the session in localStorage is still valid.
+          // Don't nuke it just because the server was slow. Use the cached session.
+          await loadUser(session.user.id)
+          return
+        }
 
         if (error || !authUser) {
           clearStaleSession()
@@ -174,10 +186,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
       if (!localStorage.getItem('nexus-hr-auth')) return
 
-      if (hiddenAt > 0 && Date.now() - hiddenAt > 3 * 60 * 1000) {
+      const hiddenForMs = hiddenAt > 0 ? Date.now() - hiddenAt : 0
+
+      if (hiddenAt > 0 && hiddenForMs > 3 * 60 * 1000) {
         window.location.reload()
         return
       }
+
+      // Brief alt-tab (< 30 s) — don't revalidate. Calling getUser() here fires
+      // onAuthStateChange SIGNED_IN, which recreates the user object, which resets
+      // every data-fetch useEffect and leaves components stuck on "Loading...".
+      if (hiddenForMs < 30 * 1000) return
 
       try {
         const { data: { user: authUser }, error } = await supabase.auth.getUser()
@@ -196,6 +215,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (!mounted) return
       if ((event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') && session?.user) {
+        // Same user already loaded — skip the DB round-trip. Recreating the user
+        // object with identical data changes its reference, which triggers every
+        // useEffect([user]) to re-run and reset components to loading state.
+        if (loadedUserId === session.user.id) return
         await loadUser(session.user.id)
       } else if (event === 'SIGNED_OUT') {
         setUser(null)
