@@ -36,6 +36,11 @@ export async function POST(request: NextRequest) {
       phone, personalEmail, address, city, postalCode,
       emergencyContactName, emergencyContactPhone, emergencyContactRelationship,
       idNumber, dateOfBirth,
+      postalAddress, passportNumber, gender, maritalStatus, language,
+      numberOfDependants, spouseName, taxNumber, taxOffice,
+      bankName, bankBranchCode, bankAccountNumber, bankAccountType,
+      bankAccountHolderName, bankAccountRelationship,
+      eeaGroup, eeaHasDisability, eeaDisabilityDescription,
     } = body
 
     if (!email || !password || !firstName || !lastName || !role) {
@@ -78,6 +83,24 @@ export async function POST(request: NextRequest) {
         emergency_contact_relationship: emergencyContactRelationship || null,
         id_number: idNumber || null,
         date_of_birth: dateOfBirth || null,
+        postal_address: postalAddress || null,
+        passport_number: passportNumber || null,
+        gender: gender || null,
+        marital_status: maritalStatus || null,
+        language: language || null,
+        number_of_dependants: numberOfDependants ?? null,
+        spouse_name: spouseName || null,
+        tax_number: taxNumber || null,
+        tax_office: taxOffice || null,
+        bank_name: bankName || null,
+        bank_branch_code: bankBranchCode || null,
+        bank_account_number: bankAccountNumber || null,
+        bank_account_type: bankAccountType || null,
+        bank_account_holder_name: bankAccountHolderName || null,
+        bank_account_relationship: bankAccountRelationship || null,
+        eea_group: eeaGroup || null,
+        eea_has_disability: eeaHasDisability ?? false,
+        eea_disability_description: eeaDisabilityDescription || null,
         is_active: true,
       })
 
@@ -91,13 +114,27 @@ export async function POST(request: NextRequest) {
 
     if (leaveTypes && leaveTypes.length > 0) {
       const currentYear = new Date().getFullYear()
-      const balances = (leaveTypes as { id: string; default_days: number }[]).map((lt) => ({
-        user_id: authData.user.id,
-        leave_type_id: lt.id,
-        total_days: lt.default_days,
-        used_days: 0,
-        year: currentYear,
-      }))
+
+      // Fetch grade-based entitlements if the employee has a grade assigned
+      let gradeEntitlements: { leave_type_id: string; days: number }[] = []
+      if (grade) {
+        const { data: ent } = await supabaseAdmin
+          .from('grade_leave_entitlements' as any)
+          .select('leave_type_id, days')
+          .eq('grade', grade)
+        gradeEntitlements = (ent as any[]) ?? []
+      }
+
+      const balances = (leaveTypes as { id: string; default_days: number }[]).map((lt) => {
+        const override = gradeEntitlements.find(e => e.leave_type_id === lt.id)
+        return {
+          user_id:       authData.user.id,
+          leave_type_id: lt.id,
+          total_days:    override ? override.days : lt.default_days,
+          used_days:     0,
+          year:          currentYear,
+        }
+      })
       await supabaseAdmin.from('leave_balances').insert(balances)
     }
 

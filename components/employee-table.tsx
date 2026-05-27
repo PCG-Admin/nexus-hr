@@ -4,12 +4,13 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import type { Employee } from "@/lib/supabase/leave-service"
-import { Pencil, Trash2, ShieldAlert, UserX, UserCheck } from "lucide-react"
+import { Pencil, Trash2, ShieldAlert, UserX, UserCheck, Eye } from "lucide-react"
 
 type EmployeeTableProps = {
   employees: Employee[]
   onEditEmployee: (employee: Employee) => void
   onDeleteEmployee: (employee: Employee) => void
+  onViewEmployee?: (employee: Employee) => void
   onDisciplinaryClick?: (employee: Employee) => void
   onDisableEmployee?: (employee: Employee, setActive: boolean) => void
 }
@@ -18,6 +19,7 @@ export function EmployeeTable({
   employees,
   onEditEmployee,
   onDeleteEmployee,
+  onViewEmployee,
   onDisciplinaryClick,
   onDisableEmployee,
 }: EmployeeTableProps) {
@@ -96,6 +98,16 @@ export function EmployeeTable({
               </TableCell>
               <TableCell className="text-right">
                 <div className="flex justify-end gap-2 flex-wrap">
+                  {onViewEmployee && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => onViewEmployee(employee)}
+                    >
+                      <Eye className="w-4 h-4 mr-2" />
+                      View
+                    </Button>
+                  )}
                   {onDisciplinaryClick && (
                     <Button
                       variant="ghost"

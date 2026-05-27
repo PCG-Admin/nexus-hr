@@ -4,7 +4,12 @@ export type EmploymentType  = "permanent" | "fixed_term" | "probation"
 export type DisciplinaryType   = "verbal_warning" | "written_warning" | "final_warning" | "dismissal"
 export type DisciplinaryStatus = "draft" | "finalised"
 export type CycleType    = "monthly" | "quarterly" | "biannual" | "annual"
-export type ReviewStatus = "draft" | "submitted" | "manager_reviewed" | "hr_approved"
+export type ReviewStatus = "draft" | "submitted" | "manager_reviewed" | "hr_approved" | "acknowledged" | "gm_approved"
+export type Gender          = "male" | "female" | "other" | "prefer_not_to_say"
+export type MaritalStatus   = "single" | "married" | "divorced" | "widowed"
+export type BankAccountType = "savings" | "cheque" | "current"
+export type EeaGroup        = "african" | "coloured" | "indian" | "white" | "foreign_national"
+export type DocumentType    = "proof_of_residence" | "proof_of_banking" | "copy_of_id" | "proof_of_tax" | "other"
 
 export type Database = {
   public: {
@@ -35,6 +40,24 @@ export type Database = {
           emergency_contact_relationship: string | null
           id_number:                      string | null
           date_of_birth:                  string | null
+          postal_address:                 string | null
+          gender:                         Gender | null
+          marital_status:                 MaritalStatus | null
+          language:                       string | null
+          number_of_dependants:           number | null
+          spouse_name:                    string | null
+          passport_number:                string | null
+          tax_number:                     string | null
+          tax_office:                     string | null
+          bank_name:                      string | null
+          bank_branch_code:               string | null
+          bank_account_number:            string | null
+          bank_account_type:              BankAccountType | null
+          bank_account_holder_name:       string | null
+          bank_account_relationship:      string | null
+          eea_group:                      EeaGroup | null
+          eea_has_disability:             boolean
+          eea_disability_description:     string | null
           is_active:                      boolean
           created_at:                     string
           updated_at:                     string
@@ -62,6 +85,24 @@ export type Database = {
           emergency_contact_relationship?: string | null
           id_number?:                      string | null
           date_of_birth?:                  string | null
+          postal_address?:                 string | null
+          gender?:                         Gender | null
+          marital_status?:                 MaritalStatus | null
+          language?:                       string | null
+          number_of_dependants?:           number | null
+          spouse_name?:                    string | null
+          passport_number?:                string | null
+          tax_number?:                     string | null
+          tax_office?:                     string | null
+          bank_name?:                      string | null
+          bank_branch_code?:               string | null
+          bank_account_number?:            string | null
+          bank_account_type?:              BankAccountType | null
+          bank_account_holder_name?:       string | null
+          bank_account_relationship?:      string | null
+          eea_group?:                      EeaGroup | null
+          eea_has_disability?:             boolean
+          eea_disability_description?:     string | null
           is_active?:                      boolean
           created_at?:                     string
           updated_at?:                     string
@@ -331,6 +372,62 @@ export type Database = {
           updated_at?:             string
         }
         Update: Partial<Database["public"]["Tables"]["performance_reviews"]["Insert"]>
+        Relationships: []
+      }
+
+      // ── employee_documents ─────────────────────────────────────────────
+      employee_documents: {
+        Row: {
+          id:            string
+          employee_id:   string
+          document_type: DocumentType
+          file_url:      string
+          file_name:     string | null
+          uploaded_by:   string | null
+          created_at:    string
+        }
+        Insert: {
+          id?:            string
+          employee_id:    string
+          document_type:  DocumentType
+          file_url:       string
+          file_name?:     string | null
+          uploaded_by?:   string | null
+          created_at?:    string
+        }
+        Update: Partial<Database["public"]["Tables"]["employee_documents"]["Insert"]>
+        Relationships: []
+      }
+
+      // ── org_departments ────────────────────────────────────────────────
+      org_departments: {
+        Row: {
+          id:         string
+          name:       string
+          is_active:  boolean
+          created_at: string
+        }
+        Insert: {
+          id?:         string
+          name:        string
+          is_active?:  boolean
+          created_at?: string
+        }
+        Update: Partial<Database["public"]["Tables"]["org_departments"]["Insert"]>
+        Relationships: []
+      }
+
+      // ── org_grades ─────────────────────────────────────────────────────
+      org_grades: {
+        Row: {
+          grade:     number
+          is_active: boolean
+        }
+        Insert: {
+          grade:      number
+          is_active?: boolean
+        }
+        Update: Partial<Database["public"]["Tables"]["org_grades"]["Insert"]>
         Relationships: []
       }
 

@@ -9,6 +9,7 @@ import { EmployeeTable } from "@/components/employee-table"
 import { EditBalanceDialog } from "@/components/edit-balance-dialog"
 import { AddEmployeeDialog } from "@/components/add-employee-dialog"
 import { EditEmployeeDialog } from "@/components/edit-employee-dialog"
+import { ViewEmployeeProfileDialog } from "@/components/view-employee-profile-dialog"
 import { DisciplinaryRecordsDialog } from "@/components/disciplinary-records-dialog"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -21,10 +22,15 @@ import {
   updateLeaveBalance,
   getLeaveTypes,
   updateLeaveType,
+  getAnnualLeaveEntitlements,
+  updateAnnualLeaveEntitlement,
+  insertAnnualLeaveEntitlement,
+  deleteAnnualLeaveEntitlement,
   type Employee,
   type LeaveRequestWithEmployee,
   type LeaveBalanceWithEmployee,
   type LeaveType,
+  type GradeEntitlement,
 } from "@/lib/supabase/leave-service"
 import { Switch } from "@/components/ui/switch"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -40,7 +46,7 @@ import {
   type PublicHoliday,
 } from "@/lib/supabase/holiday-service"
 import { DEMO_EMPLOYEES } from "@/lib/demo-data"
-import { getOrgConfig, saveOrgConfig, type OrgConfig } from "@/lib/org-config"
+import { getOrgConfig, addDepartment, removeDepartment, addGrade, removeGrade, type OrgConfig } from "@/lib/org-config"
 import { apiFetch } from "@/lib/api-fetch"
 import { getAllPolicies, archivePolicy, restorePolicy, getPolicyAcknowledgements, type HRPolicy, type PolicyAcknowledgement } from "@/lib/supabase/policy-service"
 import { UploadPolicyDialog } from "@/components/upload-policy-dialog"
@@ -65,6 +71,7 @@ export default function AdminDashboardPage() {
   const [expandedEmployees, setExpandedEmployees] = useState<Set<string>>(new Set())
   const [isAddEmployeeOpen, setIsAddEmployeeOpen] = useState(false)
   const [editingEmployee, setEditingEmployee] = useState<Employee | null>(null)
+  const [viewingEmployee, setViewingEmployee] = useState<Employee | null>(null)
   const [deletingEmployee, setDeletingEmployee] = useState<Employee | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
   const [disciplinaryEmployee, setDisciplinaryEmployee] = useState<Employee | null>(null)
@@ -73,6 +80,9 @@ export default function AdminDashboardPage() {
   const [savingLeaveTypeId, setSavingLeaveTypeId] = useState<string | null>(null)
 
   const [orgConfig, setOrgConfig] = useState<OrgConfig>({ departments: [], grades: [] })
+  const [gradeEntitlements, setGradeEntitlements] = useState<GradeEntitlement[]>([])
+  const [savingEntitlementGrade, setSavingEntitlementGrade] = useState<number | null>(null)
+  const [entitlementEdits, setEntitlementEdits] = useState<Record<number, string>>({})
   const [newDeptName, setNewDeptName] = useState("")
   const [newGradeValue, setNewGradeValue] = useState("")
 
@@ -197,7 +207,11 @@ export default function AdminDashboardPage() {
     if (user && ["hr_manager", "system_admin"].includes(user.role)) {
       fetchData()
       fetchHolidays()
-      setOrgConfig(getOrgConfig())
+      getOrgConfig().then(setOrgConfig)
+      getAnnualLeaveEntitlements().then(ents => {
+        setGradeEntitlements(ents)
+        setEntitlementEdits(Object.fromEntries(ents.map(e => [e.grade, String(e.days)])))
+      })
     }
   }, [user, fetchData, fetchHolidays])
 
@@ -207,34 +221,87 @@ export default function AdminDashboardPage() {
     }
   }, [holidayYear, user, fetchHolidays])
 
-  const handleAddDepartment = () => {
+  const handleAddDepartment = async () => {
     const name = newDeptName.trim()
     if (!name || orgConfig.departments.map(d => d.toLowerCase()).includes(name.toLowerCase())) return
-    const updated: OrgConfig = { ...orgConfig, departments: [...orgConfig.departments, name].sort() }
-    setOrgConfig(updated)
-    saveOrgConfig(updated)
+    setOrgConfig(prev => ({ ...prev, departments: [...prev.departments, name].sort() }))
     setNewDeptName("")
+    const result = await addDepartment(name)
+    if (!result.success) {
+      setOrgConfig(prev => ({ ...prev, departments: prev.departments.filter(d => d !== name) }))
+      alert(`Failed to add department: ${result.error}`)
+    }
   }
 
-  const handleRemoveDepartment = (dept: string) => {
-    const updated: OrgConfig = { ...orgConfig, departments: orgConfig.departments.filter(d => d !== dept) }
-    setOrgConfig(updated)
-    saveOrgConfig(updated)
+  const handleRemoveDepartment = async (dept: string) => {
+    setOrgConfig(prev => ({ ...prev, departments: prev.departments.filter(d => d !== dept) }))
+    const result = await removeDepartment(dept)
+    if (!result.success) {
+      setOrgConfig(prev => ({ ...prev, departments: [...prev.departments, dept].sort() }))
+      alert(`Failed to remove department: ${result.error}`)
+    }
   }
 
-  const handleAddGrade = () => {
+  const handleAddGrade = async () => {
     const val = parseInt(newGradeValue)
     if (isNaN(val) || val < 1 || val > 99 || orgConfig.grades.includes(val)) return
-    const updated: OrgConfig = { ...orgConfig, grades: [...orgConfig.grades, val].sort((a, b) => a - b) }
-    setOrgConfig(updated)
-    saveOrgConfig(updated)
+    setOrgConfig(prev => ({ ...prev, grades: [...prev.grades, val].sort((a, b) => a - b) }))
     setNewGradeValue("")
+    const result = await addGrade(val)
+    if (!result.success) {
+      setOrgConfig(prev => ({ ...prev, grades: prev.grades.filter(g => g !== val) }))
+      alert(`Failed to add grade: ${result.error}`)
+      return
+    }
+    // Auto-create an entitlement row for the new grade, defaulting to the highest existing grade's days
+    const defaultDays = gradeEntitlements.length > 0
+      ? Math.max(...gradeEntitlements.map(e => e.days))
+      : 15
+    const entResult = await insertAnnualLeaveEntitlement(val, defaultDays)
+    if (entResult.success) {
+      const newEntry = { grade: val, days: defaultDays }
+      setGradeEntitlements(prev => [...prev, newEntry].sort((a, b) => a.grade - b.grade))
+      setEntitlementEdits(prev => ({ ...prev, [val]: String(defaultDays) }))
+    } else {
+      alert(`Grade added but entitlement creation failed: ${entResult.error}`)
+    }
   }
 
-  const handleRemoveGrade = (grade: number) => {
-    const updated: OrgConfig = { ...orgConfig, grades: orgConfig.grades.filter(g => g !== grade) }
-    setOrgConfig(updated)
-    saveOrgConfig(updated)
+  const handleRemoveGrade = async (grade: number) => {
+    const confirmed = window.confirm(
+      `Remove Grade ${grade}?\n\nThis will also delete its annual leave entitlement. Any employees currently on Grade ${grade} will keep their existing leave balances, but new employees cannot be assigned this grade.`
+    )
+    if (!confirmed) return
+
+    setOrgConfig(prev => ({ ...prev, grades: prev.grades.filter(g => g !== grade) }))
+    const result = await removeGrade(grade)
+    if (!result.success) {
+      setOrgConfig(prev => ({ ...prev, grades: [...prev.grades, grade].sort((a, b) => a - b) }))
+      alert(`Failed to remove grade: ${result.error}`)
+      return
+    }
+
+    // Remove entitlement row and update local state
+    await deleteAnnualLeaveEntitlement(grade)
+    setGradeEntitlements(prev => prev.filter(e => e.grade !== grade))
+    setEntitlementEdits(prev => {
+      const next = { ...prev }
+      delete next[grade]
+      return next
+    })
+  }
+
+  const handleSaveEntitlement = async (grade: number) => {
+    const days = parseInt(entitlementEdits[grade] ?? "")
+    if (isNaN(days) || days < 1 || days > 365) return
+    setSavingEntitlementGrade(grade)
+    const result = await updateAnnualLeaveEntitlement(grade, days)
+    if (result.success) {
+      setGradeEntitlements(prev => prev.map(e => e.grade === grade ? { ...e, days } : e))
+    } else {
+      alert(`Failed to save: ${result.error}`)
+    }
+    setSavingEntitlementGrade(null)
   }
 
   const handleUpdateLeaveType = async (id: string, config: { requiresManagerApproval?: boolean; requiresDocument?: boolean; defaultDays?: number }) => {
@@ -503,6 +570,7 @@ export default function AdminDashboardPage() {
                   <CardContent>
                     <EmployeeTable
                       employees={filteredEmployees}
+                      onViewEmployee={(employee) => setViewingEmployee(employee)}
                       onEditEmployee={handleEditEmployee}
                       onDeleteEmployee={(employee) => setDeletingEmployee(employee)}
                       onDisciplinaryClick={(employee) => setDisciplinaryEmployee(employee)}
@@ -767,8 +835,7 @@ export default function AdminDashboardPage() {
                 <div className="flex items-start gap-3 px-4 py-3 rounded-lg bg-blue-50 border border-blue-200 text-sm text-blue-800">
                   <Settings2 className="w-4 h-4 shrink-0 mt-0.5" />
                   <span>
-                    Changes apply immediately to all Add/Edit Employee forms. Currently stored locally —
-                    once the database is connected, this configuration will persist for all users automatically.
+                    Changes apply immediately to all Add/Edit Employee forms.
                   </span>
                 </div>
 
@@ -889,6 +956,52 @@ export default function AdminDashboardPage() {
                     </CardContent>
                   </Card>
                 </div>
+
+                {/* ── Annual Leave Entitlements by Grade ── */}
+                {gradeEntitlements.length > 0 && (
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2 text-base">
+                        <CalendarDays className="w-4 h-4" />
+                        Annual Leave Entitlements by Grade
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="grid gap-2 sm:grid-cols-2 md:grid-cols-3">
+                        {gradeEntitlements.map(e => (
+                          <div key={e.grade} className="flex items-center gap-2 px-3 py-2 rounded-md border bg-muted/30">
+                            <span className="text-sm font-medium w-16 shrink-0">Grade {e.grade}</span>
+                            <input
+                              type="number"
+                              min={1}
+                              max={365}
+                              value={entitlementEdits[e.grade] ?? e.days}
+                              onChange={ev => setEntitlementEdits(prev => ({ ...prev, [e.grade]: ev.target.value }))}
+                              onKeyDown={ev => ev.key === "Enter" && handleSaveEntitlement(e.grade)}
+                              className="w-16 text-sm border rounded px-2 py-1 text-center focus:outline-none focus:ring-1 focus:ring-primary"
+                            />
+                            <span className="text-xs text-muted-foreground">days</span>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-7 text-xs ml-auto"
+                              disabled={
+                                savingEntitlementGrade === e.grade ||
+                                entitlementEdits[e.grade] === String(e.days)
+                              }
+                              onClick={() => handleSaveEntitlement(e.grade)}
+                            >
+                              {savingEntitlementGrade === e.grade ? "Saving…" : "Save"}
+                            </Button>
+                          </div>
+                        ))}
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-3">
+                        Applies to Annual Leave balances when a new employee is added or their grade is changed.
+                      </p>
+                    </CardContent>
+                  </Card>
+                )}
               </TabsContent>
 
               {/* Workflow Routing Tab */}
@@ -1442,6 +1555,12 @@ export default function AdminDashboardPage() {
         isOpen={!!editingEmployee}
         onClose={() => setEditingEmployee(null)}
         onSuccess={fetchData}
+      />
+
+      <ViewEmployeeProfileDialog
+        employee={viewingEmployee}
+        isOpen={!!viewingEmployee}
+        onClose={() => setViewingEmployee(null)}
       />
 
       <DisciplinaryRecordsDialog

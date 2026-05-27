@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import {
   Dialog, DialogContent, DialogDescription,
   DialogFooter, DialogHeader, DialogTitle,
@@ -32,15 +32,16 @@ export function PerformanceReviewDialog({ review, isOpen, onClose, onSuccess, re
   const [error, setError] = useState("")
   const [isSubmitting, setIsSubmitting] = useState(false)
 
-  // Sync state when review changes
-  const initState = (r: PerformanceReview) => {
-    setKpis(r.kpis.map(k => ({ ...k })))
-    setManagerNotes(r.managerNotes ?? "")
-    setError("")
-  }
+  // Initialise editable state whenever the dialog opens for a new review
+  useEffect(() => {
+    if (review) {
+      setKpis(review.kpis.map(k => ({ ...k })))
+      setManagerNotes(review.managerNotes ?? "")
+      setError("")
+    }
+  }, [review?.id])
 
   const handleOpenChange = (open: boolean) => {
-    if (open && review) initState(review)
     if (!open) onClose()
   }
 
@@ -77,7 +78,7 @@ export function PerformanceReviewDialog({ review, isOpen, onClose, onSuccess, re
     ? `${review.employee.firstName} ${review.employee.lastName}`
     : review.employeeId
 
-  const activeKpis = kpis.length > 0 ? kpis : review.kpis
+  const activeKpis = kpis
 
   return (
     <Dialog open={isOpen} onOpenChange={handleOpenChange}>

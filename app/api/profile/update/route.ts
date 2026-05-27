@@ -29,6 +29,12 @@ export async function PATCH(request: NextRequest) {
     if ('emergencyContactName'         in body) update.emergency_contact_name         = body.emergencyContactName         ?? null
     if ('emergencyContactPhone'        in body) update.emergency_contact_phone        = body.emergencyContactPhone        ?? null
     if ('emergencyContactRelationship' in body) update.emergency_contact_relationship = body.emergencyContactRelationship ?? null
+    if ('postalAddress'   in body) update.postal_address    = body.postalAddress   ?? null
+    if ('gender'          in body) update.gender             = body.gender          ?? null
+    if ('maritalStatus'   in body) update.marital_status     = body.maritalStatus   ?? null
+    if ('language'        in body) update.language           = body.language        ?? null
+    if ('numberOfDependants' in body) update.number_of_dependants = body.numberOfDependants ?? null
+    if ('spouseName'      in body) update.spouse_name        = body.spouseName      ?? null
 
     const { error } = await supabaseAdmin
       .from('employees')

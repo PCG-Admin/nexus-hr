@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useRef, useCallback } from "react"
-import { Bell, CheckCircle2, XCircle, Clock, AlertTriangle, FileText, X, CheckCheck, Megaphone } from "lucide-react"
+import { Bell, CheckCircle2, XCircle, Clock, AlertTriangle, FileText, X, CheckCheck, Megaphone, TrendingUp, ArrowRight } from "lucide-react"
 import { useRouter, usePathname } from "next/navigation"
 import {
   getNotifications,
@@ -65,6 +65,13 @@ function getNotifStyle(type: string): NotifStyle {
         iconBg: "bg-violet-100",
         dot: "bg-violet-500",
       }
+    case 'performance_reminder':
+      return {
+        icon: <TrendingUp className="w-4 h-4 text-teal-600" />,
+        bg: "bg-teal-50/60",
+        iconBg: "bg-teal-100",
+        dot: "bg-teal-500",
+      }
     default: // leave_request, info, etc.
       return {
         icon: <FileText className="w-4 h-4 text-blue-600" />,
@@ -75,12 +82,33 @@ function getNotifStyle(type: string): NotifStyle {
   }
 }
 
+function getNavTarget(notification: Notification): string {
+  const isEmployeeNotif = notification.type === 'leave_approved' || notification.type === 'leave_rejected'
+  const isAnnouncement  = notification.type === 'announcement'
+  const isPerformance   = notification.type === 'performance_reminder'
+  const basePath = isAnnouncement  ? "/dashboard/announcements"
+                 : isEmployeeNotif ? "/dashboard"
+                 : isPerformance   ? "/dashboard/performance"
+                 : "/dashboard/approvals"
+  return (!isAnnouncement && !isPerformance && notification.referenceId)
+    ? `${basePath}?request=${notification.referenceId}`
+    : basePath
+}
+
+function getNavLabel(type: string): string {
+  if (type === 'announcement')        return "View Announcement"
+  if (type === 'performance_reminder') return "Go to Performance"
+  if (type === 'leave_approved' || type === 'leave_rejected') return "View My Leave"
+  return "View Details"
+}
+
 export function NotificationBell() {
   const { user } = useAuth()
   const router = useRouter()
   const pathname = usePathname()
   const [open, setOpen] = useState(false)
   const [notifications, setNotifications] = useState<Notification[]>([])
+  const [selected, setSelected] = useState<Notification | null>(null)
   const dropdownRef = useRef<HTMLDivElement>(null)
 
   const unreadCount = notifications.filter(n => !n.read).length
@@ -113,15 +141,13 @@ export function NotificationBell() {
       setNotifications(prev => prev.map(n => n.id === notification.id ? { ...n, read: true } : n))
     }
     setOpen(false)
-    const isEmployeeNotif   = notification.type === 'leave_approved' || notification.type === 'leave_rejected'
-    const isAnnouncement    = notification.type === 'announcement'
-    const basePath = isAnnouncement ? "/dashboard/announcements"
-                   : isEmployeeNotif ? "/dashboard"
-                   : "/dashboard/approvals"
-    const target = (!isAnnouncement && notification.referenceId)
-      ? `${basePath}?request=${notification.referenceId}`
-      : basePath
-    router.push(target)
+    setSelected(notification)
+  }
+
+  const handleNavigate = () => {
+    if (!selected) return
+    setSelected(null)
+    router.push(getNavTarget(selected))
   }
 
   const handleMarkAllRead = async () => {
@@ -143,6 +169,7 @@ export function NotificationBell() {
   }
 
   return (
+    <>
     <div className="relative" ref={dropdownRef}>
       {/* Bell button */}
       <button
@@ -231,7 +258,7 @@ export function NotificationBell() {
                             <span className={`shrink-0 mt-1.5 w-2 h-2 rounded-full ${style.dot}`} />
                           )}
                         </div>
-                        <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed line-clamp-2">
+                        <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed line-clamp-3">
                           {notification.message}
                         </p>
                         <p className="text-[11px] text-muted-foreground/70 mt-1.5 font-medium">
@@ -255,6 +282,73 @@ export function NotificationBell() {
           </div>
         </div>
       )}
+    </div>
+
+    <NotificationModal
+      notification={selected}
+      onClose={() => setSelected(null)}
+      onNavigate={handleNavigate}
+    />
+    </>
+  )
+}
+
+function NotificationModal({
+  notification,
+  onClose,
+  onNavigate,
+}: {
+  notification: Notification | null
+  onClose: () => void
+  onNavigate: () => void
+}) {
+  if (!notification) return null
+  const style = getNotifStyle(notification.type)
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40" onClick={onClose}>
+      <div
+        className="bg-card rounded-xl shadow-2xl w-full max-w-md border"
+        onClick={e => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className={`flex items-start gap-3 p-5 rounded-t-xl ${style.bg}`}>
+          <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${style.iconBg}`}>
+            {style.icon}
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold leading-snug">{notification.title}</p>
+            <p className="text-xs text-muted-foreground mt-0.5">{timeAgo(notification.createdAt)}</p>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-black/5 transition-colors"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="p-5">
+          <p className="text-sm text-foreground leading-relaxed whitespace-pre-wrap">{notification.message}</p>
+        </div>
+
+        {/* Footer */}
+        <div className="flex justify-end gap-2 px-5 pb-5">
+          <button
+            onClick={onClose}
+            className="px-3 py-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
+          >
+            Close
+          </button>
+          <button
+            onClick={onNavigate}
+            className="flex items-center gap-1.5 px-4 py-1.5 text-sm font-medium bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors"
+          >
+            {getNavLabel(notification.type)}
+            <ArrowRight className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      </div>
     </div>
   )
 }

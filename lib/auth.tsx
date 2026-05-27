@@ -29,6 +29,24 @@ export type User = {
   emergencyContactRelationship: string | null
   idNumber: string | null
   dateOfBirth: string | null
+  postalAddress: string | null
+  passportNumber: string | null
+  gender: string | null
+  maritalStatus: string | null
+  language: string | null
+  numberOfDependants: number | null
+  spouseName: string | null
+  taxNumber: string | null
+  taxOffice: string | null
+  bankName: string | null
+  bankBranchCode: string | null
+  bankAccountNumber: string | null
+  bankAccountType: string | null
+  bankAccountHolderName: string | null
+  bankAccountRelationship: string | null
+  eeaGroup: string | null
+  eeaHasDisability: boolean
+  eeaDisabilityDescription: string | null
   isActive: boolean
   createdAt: string
   updatedAt: string
@@ -59,6 +77,24 @@ function mapEmployee(row: Record<string, unknown>): User {
     emergencyContactRelationship:  (row.emergency_contact_relationship as string | null) ?? null,
     idNumber:                      (row.id_number as string | null) ?? null,
     dateOfBirth:                   (row.date_of_birth as string | null) ?? null,
+    postalAddress:                 (row.postal_address as string | null) ?? null,
+    passportNumber:                (row.passport_number as string | null) ?? null,
+    gender:                        (row.gender as string | null) ?? null,
+    maritalStatus:                 (row.marital_status as string | null) ?? null,
+    language:                      (row.language as string | null) ?? null,
+    numberOfDependants:            (row.number_of_dependants as number | null) ?? null,
+    spouseName:                    (row.spouse_name as string | null) ?? null,
+    taxNumber:                     (row.tax_number as string | null) ?? null,
+    taxOffice:                     (row.tax_office as string | null) ?? null,
+    bankName:                      (row.bank_name as string | null) ?? null,
+    bankBranchCode:                (row.bank_branch_code as string | null) ?? null,
+    bankAccountNumber:             (row.bank_account_number as string | null) ?? null,
+    bankAccountType:               (row.bank_account_type as string | null) ?? null,
+    bankAccountHolderName:         (row.bank_account_holder_name as string | null) ?? null,
+    bankAccountRelationship:       (row.bank_account_relationship as string | null) ?? null,
+    eeaGroup:                      (row.eea_group as string | null) ?? null,
+    eeaHasDisability:              (row.eea_has_disability as boolean) ?? false,
+    eeaDisabilityDescription:      (row.eea_disability_description as string | null) ?? null,
     isActive:                      (row.is_active as boolean) ?? true,
     createdAt:                     row.created_at as string,
     updatedAt:                     row.updated_at as string,

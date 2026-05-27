@@ -24,10 +24,12 @@ import {
   GraduationCap,
   BadgeCheck,
   History,
+  FolderOpen,
 } from "lucide-react"
 import { format } from "date-fns"
 import type { ProfileAuditEntry } from "@/components/profile-edit-dialog"
 import { apiFetch } from "@/lib/api-fetch"
+import { EmployeeDocumentSlots } from "@/components/employee-document-slots"
 
 const ROLE_LABELS: Record<string, string> = {
   employee:     "Employee",
@@ -49,6 +51,14 @@ const EMPLOYMENT_TYPE_LABELS: Record<string, string> = {
   permanent:  "Permanent",
   fixed_term: "Fixed-Term Contract",
   probation:  "Probationary",
+}
+
+const GENDER_LABELS: Record<string, string> = {
+  male: "Male", female: "Female", other: "Other", prefer_not_to_say: "Prefer not to say",
+}
+
+const MARITAL_LABELS: Record<string, string> = {
+  single: "Single", married: "Married", divorced: "Divorced", widowed: "Widowed",
 }
 
 function Field({
@@ -238,6 +248,14 @@ export default function ProfilePage() {
               <UserIcon className="w-3.5 h-3.5" />
               Identity
             </TabsTrigger>
+            <TabsTrigger value="personal" className="gap-1.5">
+              <UserIcon className="w-3.5 h-3.5" />
+              Personal
+            </TabsTrigger>
+            <TabsTrigger value="documents" className="gap-1.5">
+              <FolderOpen className="w-3.5 h-3.5" />
+              Documents
+            </TabsTrigger>
             <TabsTrigger value="history" className="gap-1.5">
               <History className="w-3.5 h-3.5" />
               History
@@ -280,9 +298,10 @@ export default function ProfilePage() {
                 <div className="border-t pt-4">
                   <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-4">Address</p>
                   <div className="grid grid-cols-2 gap-6">
-                    <Field icon={MapPin} label="Street Address" value={user.address} />
-                    <Field icon={MapPin} label="City"           value={user.city} />
-                    <Field icon={Hash}   label="Postal Code"    value={user.postalCode} />
+                    <Field icon={MapPin} label="Street Address"              value={user.address} />
+                    <Field icon={MapPin} label="City"                        value={user.city} />
+                    <Field icon={Hash}   label="Postal Code"                 value={user.postalCode} />
+                    <Field icon={MapPin} label="Postal Address (if different)" value={(user as any).postalAddress} />
                   </div>
                 </div>
               </CardContent>
@@ -327,13 +346,49 @@ export default function ProfilePage() {
               <CardContent className="pt-6 space-y-6">
                 <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Sensitive Identity Information</p>
                 <div className="grid grid-cols-2 gap-6">
-                  <Field icon={Hash}     label="ID / Passport Number" value={user.idNumber} />
-                  <Field icon={Calendar} label="Date of Birth"        value={user.dateOfBirth ? format(new Date(user.dateOfBirth), "d MMMM yyyy") : null} />
+                  <Field icon={Hash}     label="SA ID Number"    value={user.idNumber} />
+                  <Field icon={Hash}     label="Passport Number" value={(user as any).passportNumber} />
+                  <Field icon={Calendar} label="Date of Birth"   value={user.dateOfBirth ? format(new Date(user.dateOfBirth), "d MMMM yyyy") : null} />
                 </div>
                 <SensitiveNotice />
               </CardContent>
             </Card>
           </TabsContent>
+          {/* Personal tab */}
+          <TabsContent value="personal">
+            <Card>
+              <CardContent className="pt-6 space-y-6">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Personal Details</p>
+                  <Button variant="outline" size="sm" className="gap-1.5 h-7 text-xs" onClick={() => setIsEditOpen(true)}>
+                    <Pencil className="w-3 h-3" />
+                    Edit
+                  </Button>
+                </div>
+                <div className="grid grid-cols-2 gap-6">
+                  <Field icon={UserIcon} label="Gender"               value={(user as any).gender ? (GENDER_LABELS[(user as any).gender] ?? (user as any).gender) : null} />
+                  <Field icon={UserIcon} label="Marital Status"        value={(user as any).maritalStatus ? (MARITAL_LABELS[(user as any).maritalStatus] ?? (user as any).maritalStatus) : null} />
+                  <Field icon={UserIcon} label="Home Language"         value={(user as any).language} />
+                  <Field icon={Hash}     label="Number of Dependants"  value={(user as any).numberOfDependants != null ? String((user as any).numberOfDependants) : null} />
+                  <Field icon={UserIcon} label="Spouse / Partner Name" value={(user as any).spouseName} />
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* Documents tab */}
+          <TabsContent value="documents">
+            <Card>
+              <CardContent className="pt-6 space-y-4">
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Required Documents</p>
+                <EmployeeDocumentSlots
+                  employeeId={user.id}
+                  uploadedById={user.id}
+                />
+              </CardContent>
+            </Card>
+          </TabsContent>
+
           {/* Profile change history tab */}
           <TabsContent value="history">
             <Card>

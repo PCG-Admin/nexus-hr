@@ -381,12 +381,30 @@ export type Employee = {
   address: string | null
   city: string | null
   postalCode: string | null
+  postalAddress: string | null
   emergencyContactName: string | null
   emergencyContactPhone: string | null
   emergencyContactRelationship: string | null
   managerId: string | null
   idNumber: string | null
   dateOfBirth: string | null
+  gender: string | null
+  maritalStatus: string | null
+  language: string | null
+  numberOfDependants: number | null
+  spouseName: string | null
+  passportNumber: string | null
+  taxNumber: string | null
+  taxOffice: string | null
+  bankName: string | null
+  bankBranchCode: string | null
+  bankAccountNumber: string | null
+  bankAccountType: string | null
+  bankAccountHolderName: string | null
+  bankAccountRelationship: string | null
+  eeaGroup: string | null
+  eeaHasDisability: boolean
+  eeaDisabilityDescription: string | null
   isActive: boolean
 }
 
@@ -682,12 +700,30 @@ export async function getAllEmployees(): Promise<Employee[]> {
     address: (row.address as string | null) ?? null,
     city: (row.city as string | null) ?? null,
     postalCode: (row.postal_code as string | null) ?? null,
+    postalAddress: (row.postal_address as string | null) ?? null,
     emergencyContactName: (row.emergency_contact_name as string | null) ?? null,
     emergencyContactPhone: (row.emergency_contact_phone as string | null) ?? null,
     emergencyContactRelationship: (row.emergency_contact_relationship as string | null) ?? null,
     managerId: (row.manager_id as string | null) ?? null,
     idNumber: (row.id_number as string | null) ?? null,
     dateOfBirth: (row.date_of_birth as string | null) ?? null,
+    gender: (row.gender as string | null) ?? null,
+    maritalStatus: (row.marital_status as string | null) ?? null,
+    language: (row.language as string | null) ?? null,
+    numberOfDependants: (row.number_of_dependants as number | null) ?? null,
+    spouseName: (row.spouse_name as string | null) ?? null,
+    passportNumber: (row.passport_number as string | null) ?? null,
+    taxNumber: (row.tax_number as string | null) ?? null,
+    taxOffice: (row.tax_office as string | null) ?? null,
+    bankName: (row.bank_name as string | null) ?? null,
+    bankBranchCode: (row.bank_branch_code as string | null) ?? null,
+    bankAccountNumber: (row.bank_account_number as string | null) ?? null,
+    bankAccountType: (row.bank_account_type as string | null) ?? null,
+    bankAccountHolderName: (row.bank_account_holder_name as string | null) ?? null,
+    bankAccountRelationship: (row.bank_account_relationship as string | null) ?? null,
+    eeaGroup: (row.eea_group as string | null) ?? null,
+    eeaHasDisability: (row.eea_has_disability as boolean) ?? false,
+    eeaDisabilityDescription: (row.eea_disability_description as string | null) ?? null,
     isActive: (row.is_active as boolean) ?? true,
   }))
 }
@@ -934,6 +970,24 @@ export async function updateEmployee(
     emergencyContactRelationship: string | null
     idNumber: string | null
     dateOfBirth: string | null
+    postalAddress: string | null
+    passportNumber: string | null
+    gender: string | null
+    maritalStatus: string | null
+    language: string | null
+    numberOfDependants: number | null
+    spouseName: string | null
+    taxNumber: string | null
+    taxOffice: string | null
+    bankName: string | null
+    bankBranchCode: string | null
+    bankAccountNumber: string | null
+    bankAccountType: string | null
+    bankAccountHolderName: string | null
+    bankAccountRelationship: string | null
+    eeaGroup: string | null
+    eeaHasDisability: boolean
+    eeaDisabilityDescription: string | null
   },
   audit?: {
     actorId: string
@@ -967,6 +1021,24 @@ export async function updateEmployee(
       emergency_contact_relationship: data.emergencyContactRelationship,
       id_number: data.idNumber,
       date_of_birth: data.dateOfBirth,
+      postal_address: data.postalAddress,
+      passport_number: data.passportNumber,
+      gender: data.gender as any,
+      marital_status: data.maritalStatus as any,
+      language: data.language,
+      number_of_dependants: data.numberOfDependants,
+      spouse_name: data.spouseName,
+      tax_number: data.taxNumber,
+      tax_office: data.taxOffice,
+      bank_name: data.bankName,
+      bank_branch_code: data.bankBranchCode,
+      bank_account_number: data.bankAccountNumber,
+      bank_account_type: data.bankAccountType as any,
+      bank_account_holder_name: data.bankAccountHolderName,
+      bank_account_relationship: data.bankAccountRelationship,
+      eea_group: data.eeaGroup as any,
+      eea_has_disability: data.eeaHasDisability,
+      eea_disability_description: data.eeaDisabilityDescription,
       updated_at: new Date().toISOString(),
     })
     .eq('id', employeeId)
@@ -983,6 +1055,25 @@ export async function updateEmployee(
       actor_name:  audit.actorName,
       changes:     audit.changes,
     })
+  }
+
+  // Recalculate leave balances for the current year when grade is set
+  if (data.grade) {
+    const currentYear = new Date().getFullYear()
+    const { data: entitlements } = await (supabase as any)
+      .from('grade_leave_entitlements')
+      .select('leave_type_id, days')
+      .eq('grade', data.grade)
+    if (entitlements && (entitlements as any[]).length > 0) {
+      for (const e of entitlements as { leave_type_id: string; days: number }[]) {
+        await supabase
+          .from('leave_balances')
+          .update({ total_days: e.days })
+          .eq('user_id', employeeId)
+          .eq('leave_type_id', e.leave_type_id)
+          .eq('year', currentYear)
+      }
+    }
   }
 
   return { success: true }
@@ -1044,5 +1135,85 @@ export async function deleteEmployee(
     return { success: false, error: error.message }
   }
 
+  return { success: true }
+}
+
+// ── Grade leave entitlements ──────────────────────────────
+
+export type GradeEntitlement = { grade: number; days: number }
+
+export async function getAnnualLeaveEntitlements(): Promise<GradeEntitlement[]> {
+  if (!isDbConfigured()) return []
+  const supabase = createClient()
+
+  const { data: lt } = await supabase
+    .from('leave_types')
+    .select('id')
+    .eq('name', 'Annual Leave')
+    .single()
+  if (!lt) return []
+
+  const { data } = await (supabase as any)
+    .from('grade_leave_entitlements')
+    .select('grade, days')
+    .eq('leave_type_id', lt.id)
+    .order('grade')
+  return (data as any[] ?? []).map(r => ({ grade: r.grade as number, days: r.days as number }))
+}
+
+export async function deleteAnnualLeaveEntitlement(
+  grade: number
+): Promise<{ success: boolean; error?: string }> {
+  if (!isDbConfigured()) return { success: true }
+  const supabase = createClient()
+  const { error } = await (supabase as any)
+    .from('grade_leave_entitlements')
+    .delete()
+    .eq('grade', grade)
+  if (error) return { success: false, error: error.message }
+  return { success: true }
+}
+
+export async function insertAnnualLeaveEntitlement(
+  grade: number,
+  days: number
+): Promise<{ success: boolean; error?: string }> {
+  if (!isDbConfigured()) return { success: true }
+  const supabase = createClient()
+
+  const { data: lt } = await supabase
+    .from('leave_types')
+    .select('id')
+    .eq('name', 'Annual Leave')
+    .single()
+  if (!lt) return { success: false, error: 'Annual Leave type not found' }
+
+  const { error } = await (supabase as any)
+    .from('grade_leave_entitlements')
+    .insert({ grade, leave_type_id: lt.id, days })
+  if (error) return { success: false, error: error.message }
+  return { success: true }
+}
+
+export async function updateAnnualLeaveEntitlement(
+  grade: number,
+  days: number
+): Promise<{ success: boolean; error?: string }> {
+  if (!isDbConfigured()) return { success: true }
+  const supabase = createClient()
+
+  const { data: lt } = await supabase
+    .from('leave_types')
+    .select('id')
+    .eq('name', 'Annual Leave')
+    .single()
+  if (!lt) return { success: false, error: 'Annual Leave type not found' }
+
+  const { error } = await (supabase as any)
+    .from('grade_leave_entitlements')
+    .update({ days })
+    .eq('grade', grade)
+    .eq('leave_type_id', lt.id)
+  if (error) return { success: false, error: error.message }
   return { success: true }
 }
