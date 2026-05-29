@@ -1,6 +1,7 @@
 import { createClient } from './client'
 import type { Database } from './types'
 import type { UserRole } from '@/lib/auth'
+import { writeAdminAudit } from './admin-audit-service'
 
 const isDbConfigured = () =>
   process.env.NEXT_PUBLIC_SUPABASE_URL !== 'https://placeholder.supabase.co'
@@ -301,6 +302,15 @@ export async function submitLeaveRequest(request: {
     endDate:        row.end_date,
   })
 
+  writeAdminAudit({
+    actorId:     request.userId,
+    actorName:   request.employeeName || 'Employee',
+    action:      'leave_submitted',
+    entityType:  'leave_request',
+    entityId:    row.id,
+    entityLabel: `${request.employeeName || 'Employee'} — ${row.leave_types?.name || 'Leave'} (${row.start_date} to ${row.end_date})`,
+  })
+
   // Notify the right audience based on initial status
   postNotification({
     leaveRequestId: row.id,
@@ -593,6 +603,17 @@ export async function approveLeaveRequest(
     notes:          notes ?? null,
   })
 
+  writeAdminAudit({
+    actorId:     reviewerId,
+    actorName:   reviewerName || 'HR / Admin',
+    action:      'leave_approved',
+    entityType:  'leave_request',
+    entityId:    requestId,
+    entityLabel: context?.employeeName
+      ? `${context.employeeName} — ${context.leaveTypeName} (${context.startDate} to ${context.endDate})`
+      : requestId,
+  })
+
   // Notify the employee whose request was approved
   const employeeId = context?.employeeId ?? (row as any)?.user_id
   if (employeeId) {
@@ -650,6 +671,17 @@ export async function rejectLeaveRequest(
     fromStatus:     current?.status ?? null,
     toStatus:       'rejected',
     notes:          notes ?? null,
+  })
+
+  writeAdminAudit({
+    actorId:     reviewerId,
+    actorName:   reviewerName || 'HR / Admin',
+    action:      'leave_rejected',
+    entityType:  'leave_request',
+    entityId:    requestId,
+    entityLabel: context?.employeeName
+      ? `${context.employeeName} — ${context.leaveTypeName} (${context.startDate} to ${context.endDate})`
+      : requestId,
   })
 
   // Notify the employee whose request was rejected

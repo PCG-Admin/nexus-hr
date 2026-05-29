@@ -1,5 +1,6 @@
 import { createClient } from './client'
 import type { DocumentType } from './types'
+import { writeAdminAudit } from './admin-audit-service'
 
 const BUCKET = 'employee-documents'
 
@@ -35,7 +36,9 @@ export async function uploadEmployeeDocument(
   employeeId: string,
   documentType: string,
   file: File,
-  uploadedById: string
+  uploadedById: string,
+  uploadedByName?: string,
+  employeeLabel?: string
 ): Promise<{ success: boolean; error?: string }> {
   const supabase = createClient()
 
@@ -78,6 +81,17 @@ export async function uploadEmployeeDocument(
   if (existing?.file_url && existing.file_url !== storagePath) {
     await supabase.storage.from(BUCKET).remove([existing.file_url])
   }
+
+  writeAdminAudit({
+    actorId:     uploadedById,
+    actorName:   uploadedByName ?? 'Unknown',
+    action:      'document_uploaded',
+    entityType:  'employee_document',
+    entityId:    employeeId,
+    entityLabel: employeeLabel
+      ? `${employeeLabel} — ${documentType.replace(/_/g, ' ')}`
+      : documentType.replace(/_/g, ' '),
+  })
 
   return { success: true }
 }

@@ -21,7 +21,7 @@ export async function POST(request: NextRequest) {
 
     const { data: profile } = await supabaseAdmin
       .from('employees' as any)
-      .select('role')
+      .select('role, first_name, last_name')
       .eq('id', currentUser.id)
       .single()
 
@@ -159,6 +159,20 @@ export async function POST(request: NextRequest) {
         console.error('Setup email error (non-fatal):', emailErr)
       }
     }
+
+    try {
+      await supabaseAdmin.from('admin_audit' as any).insert({
+        actor_id:     currentUser.id,
+        actor_name:   (profile as any).first_name
+          ? `${(profile as any).first_name} ${(profile as any).last_name ?? ''}`.trim()
+          : currentUser.email ?? 'Admin',
+        action:       'employee_created',
+        entity_type:  'employee',
+        entity_id:    authData.user.id,
+        entity_label: `${firstName} ${lastName}`,
+        changes:      [],
+      })
+    } catch { /* non-fatal */ }
 
     return NextResponse.json({ success: true, user: { id: authData.user.id, email, firstName, lastName, role } })
   } catch (err) {

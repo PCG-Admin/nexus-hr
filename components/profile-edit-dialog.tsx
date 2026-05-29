@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
+import { createClient } from "@/lib/supabase/client"
 import {
   Dialog,
   DialogContent,
@@ -137,6 +138,18 @@ export function ProfileEditDialog({ user, isOpen, onClose, onSave }: ProfileEdit
       })
 
       if (changes.length > 0) {
+        // Write to DB for admin audit trail
+        try {
+          const supabase = createClient()
+          await (supabase as any).from('employee_audit').insert({
+            employee_id: user.id,
+            actor_id:    user.id,
+            actor_name:  `${user.firstName} ${user.lastName}`,
+            changes,
+          })
+        } catch { /* non-fatal */ }
+
+        // Also keep localStorage for employee's own profile history display
         const entry: ProfileAuditEntry = {
           id:            `pa-${Date.now()}`,
           timestamp:     new Date().toISOString(),

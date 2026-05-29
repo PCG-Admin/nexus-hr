@@ -51,7 +51,7 @@ import { apiFetch } from "@/lib/api-fetch"
 import { getAllPolicies, archivePolicy, restorePolicy, getPolicyAcknowledgements, type HRPolicy, type PolicyAcknowledgement } from "@/lib/supabase/policy-service"
 import { UploadPolicyDialog } from "@/components/upload-policy-dialog"
 import { UploadNewVersionDialog } from "@/components/upload-new-version-dialog"
-import { writeAdminAudit, getAdminAuditLog, ADMIN_AUDIT_LABELS, type AdminAuditEntry } from "@/lib/supabase/admin-audit-service"
+import { writeAdminAudit, getAdminAuditUnified, UNIFIED_AUDIT_LABELS, type UnifiedAuditEntry, type AuditModule } from "@/lib/supabase/admin-audit-service"
 import { ScrollText, Megaphone } from "lucide-react"
 import { getAllAnnouncements, publishAnnouncement, deleteAnnouncement, type Announcement } from "@/lib/supabase/announcement-service"
 import { CreateAnnouncementDialog } from "@/components/create-announcement-dialog"
@@ -101,8 +101,13 @@ export default function AdminDashboardPage() {
   const [ackDrawer, setAckDrawer] = useState<{ policy: HRPolicy; acks: PolicyAcknowledgement[]; loading: boolean } | null>(null)
   const [newVersionPolicy, setNewVersionPolicy] = useState<HRPolicy | null>(null)
 
-  const [adminAuditLog, setAdminAuditLog] = useState<AdminAuditEntry[]>([])
+  const [adminAuditLog, setAdminAuditLog] = useState<UnifiedAuditEntry[]>([])
   const [isLoadingAudit, setIsLoadingAudit] = useState(false)
+  const [auditModuleFilter, setAuditModuleFilter] = useState<AuditModule | 'all'>('all')
+  const [auditSearch, setAuditSearch] = useState("")
+  const [auditDateFrom, setAuditDateFrom] = useState("")
+  const [auditDateTo, setAuditDateTo] = useState("")
+  const [auditPage, setAuditPage] = useState(1)
 
   const [announcements, setAnnouncements] = useState<Announcement[]>([])
   const [isCreateAnnouncementOpen, setIsCreateAnnouncementOpen] = useState(false)
@@ -230,6 +235,8 @@ export default function AdminDashboardPage() {
     if (!result.success) {
       setOrgConfig(prev => ({ ...prev, departments: prev.departments.filter(d => d !== name) }))
       alert(`Failed to add department: ${result.error}`)
+    } else if (user) {
+      writeAdminAudit({ actorId: user.id, actorName: `${user.firstName} ${user.lastName}`, action: 'department_added', entityType: 'org_config', entityLabel: name })
     }
   }
 
@@ -239,6 +246,8 @@ export default function AdminDashboardPage() {
     if (!result.success) {
       setOrgConfig(prev => ({ ...prev, departments: [...prev.departments, dept].sort() }))
       alert(`Failed to remove department: ${result.error}`)
+    } else if (user) {
+      writeAdminAudit({ actorId: user.id, actorName: `${user.firstName} ${user.lastName}`, action: 'department_removed', entityType: 'org_config', entityLabel: dept })
     }
   }
 
@@ -265,6 +274,9 @@ export default function AdminDashboardPage() {
     } else {
       alert(`Grade added but entitlement creation failed: ${entResult.error}`)
     }
+    if (user) {
+      writeAdminAudit({ actorId: user.id, actorName: `${user.firstName} ${user.lastName}`, action: 'grade_added', entityType: 'org_config', entityLabel: `Grade ${val}` })
+    }
   }
 
   const handleRemoveGrade = async (grade: number) => {
@@ -289,6 +301,9 @@ export default function AdminDashboardPage() {
       delete next[grade]
       return next
     })
+    if (user) {
+      writeAdminAudit({ actorId: user.id, actorName: `${user.firstName} ${user.lastName}`, action: 'grade_removed', entityType: 'org_config', entityLabel: `Grade ${grade}` })
+    }
   }
 
   const handleSaveEntitlement = async (grade: number) => {
@@ -544,7 +559,7 @@ export default function AdminDashboardPage() {
                 <TabsTrigger value="audit_log" onClick={async () => {
                   if (adminAuditLog.length === 0) {
                     setIsLoadingAudit(true)
-                    const log = await getAdminAuditLog(100)
+                    const log = await getAdminAuditUnified(250)
                     setAdminAuditLog(log)
                     setIsLoadingAudit(false)
                   }
@@ -1353,7 +1368,7 @@ export default function AdminDashboardPage() {
                                       setPublishingAnnId(ann.id)
                                       const supabase = createClient()
                                       const { data: { session } } = await supabase.auth.getSession()
-                                      await publishAnnouncement(ann.id, session?.access_token ?? "")
+                                      await publishAnnouncement(ann.id, session?.access_token ?? "", user ? { id: user.id, name: `${user.firstName} ${user.lastName}` } : undefined)
                                       await fetchData()
                                       setPublishingAnnId(null)
                                     }}
@@ -1375,7 +1390,7 @@ export default function AdminDashboardPage() {
                                   onClick={async () => {
                                     if (!confirm(`Delete "${ann.title}"?`)) return
                                     setDeletingAnnId(ann.id)
-                                    await deleteAnnouncement(ann.id)
+                                    await deleteAnnouncement(ann.id, user ? { id: user.id, name: `${user.firstName} ${user.lastName}`, title: ann.title } : undefined)
                                     await fetchData()
                                     setDeletingAnnId(null)
                                   }}
@@ -1400,71 +1415,176 @@ export default function AdminDashboardPage() {
                     <div>
                       <CardTitle className="flex items-center gap-2">
                         <ScrollText className="w-5 h-5" />
-                        Admin Audit Log
+                        Audit Log
                       </CardTitle>
                       <p className="text-sm text-muted-foreground mt-1">
-                        All administrative actions — balance changes, policy management, system events
+                        Full organisation activity — employees, leave, performance, disciplinary, config
                       </p>
                     </div>
                     <Button variant="outline" size="sm" onClick={async () => {
                       setIsLoadingAudit(true)
-                      const log = await getAdminAuditLog(100)
+                      const log = await getAdminAuditUnified(250)
                       setAdminAuditLog(log)
                       setIsLoadingAudit(false)
                     }}>
                       Refresh
                     </Button>
                   </CardHeader>
-                  <CardContent>
-                    {isLoadingAudit ? (
-                      <div className="py-10 text-center text-muted-foreground text-sm">Loading audit log…</div>
-                    ) : adminAuditLog.length === 0 ? (
-                      <div className="py-10 text-center text-muted-foreground text-sm">
-                        No admin actions recorded yet. Actions will appear here once you make changes.
-                      </div>
-                    ) : (
-                      <div className="divide-y">
-                        {adminAuditLog.map(entry => (
-                          <div key={entry.id} className="py-3.5 flex items-start gap-4">
-                            {/* Icon */}
-                            <div className="shrink-0 mt-0.5 w-8 h-8 rounded-full bg-muted flex items-center justify-center">
-                              <ScrollText className="w-3.5 h-3.5 text-muted-foreground" />
-                            </div>
-                            {/* Content */}
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-start justify-between gap-3">
-                                <div>
-                                  <p className="text-sm font-medium">
-                                    {ADMIN_AUDIT_LABELS[entry.action] ?? entry.action}
-                                    {entry.entityLabel && (
-                                      <span className="font-normal text-muted-foreground"> — {entry.entityLabel}</span>
-                                    )}
-                                  </p>
-                                  <p className="text-xs text-muted-foreground mt-0.5">by {entry.actorName}</p>
+                  <CardContent className="space-y-4">
+                    {/* Filter bar */}
+                    <div className="flex flex-wrap gap-2 items-center">
+                      <select
+                        value={auditModuleFilter}
+                        onChange={e => { setAuditModuleFilter(e.target.value as AuditModule | 'all'); setAuditPage(1) }}
+                        className="h-8 text-xs rounded-md border border-input bg-background px-2 pr-6 focus:outline-none"
+                      >
+                        <option value="all">All modules</option>
+                        <option value="employee">Employee</option>
+                        <option value="leave">Leave</option>
+                        <option value="performance">Performance</option>
+                        <option value="disciplinary">Disciplinary</option>
+                        <option value="policy">Policy</option>
+                        <option value="announcement">Announcements</option>
+                        <option value="config">Config</option>
+                      </select>
+                      <input
+                        type="text"
+                        placeholder="Search name or action…"
+                        value={auditSearch}
+                        onChange={e => { setAuditSearch(e.target.value); setAuditPage(1) }}
+                        className="h-8 text-xs rounded-md border border-input bg-background px-3 w-48 focus:outline-none"
+                      />
+                      <input
+                        type="date"
+                        value={auditDateFrom}
+                        onChange={e => setAuditDateFrom(e.target.value)}
+                        className="h-8 text-xs rounded-md border border-input bg-background px-2 focus:outline-none"
+                      />
+                      <span className="text-xs text-muted-foreground">to</span>
+                      <input
+                        type="date"
+                        value={auditDateTo}
+                        onChange={e => setAuditDateTo(e.target.value)}
+                        className="h-8 text-xs rounded-md border border-input bg-background px-2 focus:outline-none"
+                      />
+                      {(auditModuleFilter !== 'all' || auditSearch || auditDateFrom || auditDateTo) && (
+                        <Button variant="ghost" size="sm" className="h-8 text-xs px-2" onClick={() => {
+                          setAuditModuleFilter('all')
+                          setAuditSearch("")
+                          setAuditDateFrom("")
+                          setAuditDateTo("")
+                          setAuditPage(1)
+                        }}>Clear</Button>
+                      )}
+                    </div>
+
+                    {(() => {
+                      const MODULE_COLORS: Record<string, string> = {
+                        employee:     'bg-blue-100 text-blue-700',
+                        leave:        'bg-emerald-100 text-emerald-700',
+                        performance:  'bg-purple-100 text-purple-700',
+                        disciplinary: 'bg-red-100 text-red-700',
+                        policy:       'bg-amber-100 text-amber-700',
+                        announcement: 'bg-sky-100 text-sky-700',
+                        config:       'bg-slate-100 text-slate-600',
+                      }
+
+                      const filtered = adminAuditLog.filter(e => {
+                        if (auditModuleFilter !== 'all' && e.module !== auditModuleFilter) return false
+                        if (auditSearch) {
+                          const q = auditSearch.toLowerCase()
+                          const label = (UNIFIED_AUDIT_LABELS[e.action] ?? e.action).toLowerCase()
+                          const entity = (e.entityLabel ?? '').toLowerCase()
+                          const actor = e.actorName.toLowerCase()
+                          if (!label.includes(q) && !entity.includes(q) && !actor.includes(q)) return false
+                        }
+                        if (auditDateFrom && e.timestamp < auditDateFrom) return false
+                        if (auditDateTo && e.timestamp > auditDateTo + 'T23:59:59') return false
+                        return true
+                      })
+
+                      if (isLoadingAudit) return <div className="py-10 text-center text-muted-foreground text-sm">Loading audit log…</div>
+                      if (adminAuditLog.length === 0) return <div className="py-10 text-center text-muted-foreground text-sm">No activity recorded yet.</div>
+                      if (filtered.length === 0) return <div className="py-10 text-center text-muted-foreground text-sm">No entries match the current filters.</div>
+
+                      const PAGE_SIZE = 10
+                      const totalPages = Math.ceil(filtered.length / PAGE_SIZE)
+                      const page = Math.min(auditPage, totalPages)
+                      const pageEntries = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
+
+                      return (
+                        <>
+                          <div className="divide-y">
+                            {pageEntries.map(entry => (
+                              <div key={entry.id} className="py-3.5 flex items-start gap-3">
+                                <div className="shrink-0 mt-0.5">
+                                  <span className={`inline-block text-[10px] font-medium px-1.5 py-0.5 rounded capitalize ${MODULE_COLORS[entry.module] ?? 'bg-muted text-muted-foreground'}`}>
+                                    {entry.module}
+                                  </span>
                                 </div>
-                                <span className="shrink-0 text-xs text-muted-foreground whitespace-nowrap">
-                                  {new Date(entry.timestamp).toLocaleDateString("en-ZA", { day: "2-digit", month: "short", year: "numeric" })}
-                                  {" · "}
-                                  {new Date(entry.timestamp).toLocaleTimeString("en-ZA", { hour: "2-digit", minute: "2-digit" })}
-                                </span>
-                              </div>
-                              {entry.changes.length > 0 && (
-                                <div className="mt-1.5 flex flex-wrap gap-1.5">
-                                  {entry.changes.map((c, i) => (
-                                    <span key={i} className="inline-flex items-center gap-1 text-xs bg-muted px-2 py-0.5 rounded">
-                                      <span className="text-muted-foreground">{c.label}:</span>
-                                      <span className="line-through text-red-600/70">{c.previousValue}</span>
-                                      <ArrowRight className="w-2.5 h-2.5 text-muted-foreground" />
-                                      <span className="text-emerald-700">{c.newValue}</span>
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-start justify-between gap-3">
+                                    <div>
+                                      <p className="text-sm font-medium">
+                                        {UNIFIED_AUDIT_LABELS[entry.action] ?? entry.action}
+                                        {entry.entityLabel && (
+                                          <span className="font-normal text-muted-foreground"> — {entry.entityLabel}</span>
+                                        )}
+                                      </p>
+                                      <p className="text-xs text-muted-foreground mt-0.5">by {entry.actorName}</p>
+                                    </div>
+                                    <span className="shrink-0 text-xs text-muted-foreground whitespace-nowrap">
+                                      {new Date(entry.timestamp).toLocaleDateString("en-ZA", { day: "2-digit", month: "short", year: "numeric" })}
+                                      {" · "}
+                                      {new Date(entry.timestamp).toLocaleTimeString("en-ZA", { hour: "2-digit", minute: "2-digit" })}
                                     </span>
-                                  ))}
+                                  </div>
+                                  {entry.changes.length > 0 && (
+                                    <div className="mt-1.5 flex flex-wrap gap-1.5">
+                                      {entry.changes.map((c, i) => (
+                                        <span key={i} className="inline-flex items-center gap-1 text-xs bg-muted px-2 py-0.5 rounded">
+                                          <span className="text-muted-foreground">{c.label}:</span>
+                                          <span className="line-through text-red-600/70">{c.previousValue}</span>
+                                          <ArrowRight className="w-2.5 h-2.5 text-muted-foreground" />
+                                          <span className="text-emerald-700">{c.newValue}</span>
+                                        </span>
+                                      ))}
+                                    </div>
+                                  )}
                                 </div>
-                              )}
-                            </div>
+                              </div>
+                            ))}
                           </div>
-                        ))}
-                      </div>
-                    )}
+                          {totalPages > 1 && (
+                            <div className="flex items-center justify-between pt-4 border-t mt-2">
+                              <p className="text-xs text-muted-foreground">
+                                {((page - 1) * PAGE_SIZE) + 1}–{Math.min(page * PAGE_SIZE, filtered.length)} of {filtered.length}
+                              </p>
+                              <div className="flex items-center gap-1">
+                                <Button variant="outline" size="sm" className="h-7 px-2 text-xs" disabled={page <= 1} onClick={() => setAuditPage(p => p - 1)}>
+                                  Previous
+                                </Button>
+                                {Array.from({ length: totalPages }, (_, i) => i + 1)
+                                  .filter(p => p === 1 || p === totalPages || Math.abs(p - page) <= 1)
+                                  .reduce<(number | '...')[]>((acc, p, idx, arr) => {
+                                    if (idx > 0 && p - (arr[idx - 1] as number) > 1) acc.push('...')
+                                    acc.push(p)
+                                    return acc
+                                  }, [])
+                                  .map((p, i) => p === '...'
+                                    ? <span key={`ellipsis-${i}`} className="text-xs text-muted-foreground px-1">…</span>
+                                    : <Button key={p} variant={p === page ? "default" : "outline"} size="sm" className="h-7 w-7 p-0 text-xs" onClick={() => setAuditPage(p as number)}>{p}</Button>
+                                  )
+                                }
+                                <Button variant="outline" size="sm" className="h-7 px-2 text-xs" disabled={page >= totalPages} onClick={() => setAuditPage(p => p + 1)}>
+                                  Next
+                                </Button>
+                              </div>
+                            </div>
+                          )}
+                        </>
+                      )
+                    })()}
                   </CardContent>
                 </Card>
               </TabsContent>

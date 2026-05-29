@@ -34,6 +34,7 @@ import {
 } from "recharts"
 import { format, startOfMonth, endOfMonth, eachMonthOfInterval, subMonths } from "date-fns"
 import { DEMO_EMPLOYEES, DEMO_LEAVE_REQUESTS } from "@/lib/demo-data"
+import { writeAdminAudit } from "@/lib/supabase/admin-audit-service"
 
 export default function ReportsPage() {
   const { user, isLoading } = useAuth()
@@ -234,6 +235,16 @@ export default function ReportsPage() {
     a.click()
     document.body.removeChild(a)
     window.URL.revokeObjectURL(url)
+
+    if (user) {
+      writeAdminAudit({
+        actorId:     user.id,
+        actorName:   `${user.firstName} ${user.lastName}`,
+        action:      'report_exported',
+        entityType:  'report',
+        entityLabel: `Leave Report CSV — ${allRequests.length} records`,
+      })
+    }
   }
 
   const filteredBalances = leaveBalances.filter(b => {

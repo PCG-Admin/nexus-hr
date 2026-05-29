@@ -1,4 +1,5 @@
 import { createClient } from './client'
+import { writeAdminAudit } from './admin-audit-service'
 
 const isDbConfigured = () =>
   !!(process.env.NEXT_PUBLIC_SUPABASE_URL && !process.env.NEXT_PUBLIC_SUPABASE_URL.includes('placeholder'))
@@ -196,6 +197,7 @@ export async function createAnnouncement(params: {
 export async function publishAnnouncement(
   announcementId: string,
   accessToken: string,
+  actor?: { id: string; name: string },
 ): Promise<{ success: boolean; error?: string }> {
   if (!isDbConfigured()) return { success: true }
   const supabase = createClient()
@@ -210,6 +212,17 @@ export async function publishAnnouncement(
     .single()
 
   if (updateErr || !ann) return { success: false, error: updateErr?.message }
+
+  if (actor) {
+    writeAdminAudit({
+      actorId:     actor.id,
+      actorName:   actor.name,
+      action:      'announcement_published',
+      entityType:  'announcement',
+      entityId:    announcementId,
+      entityLabel: ann.title,
+    })
+  }
 
   // 2. Find recipient employee IDs based on targeting
   let recipientIds: string[] = []
@@ -294,6 +307,7 @@ export async function updateAnnouncement(
 
 export async function deleteAnnouncement(
   announcementId: string,
+  actor?: { id: string; name: string; title?: string },
 ): Promise<{ success: boolean; error?: string }> {
   if (!isDbConfigured()) return { success: true }
   const supabase = createClient()
@@ -301,7 +315,18 @@ export async function deleteAnnouncement(
     .from('announcements')
     .delete()
     .eq('id', announcementId)
-  return error ? { success: false, error: error.message } : { success: true }
+  if (error) return { success: false, error: error.message }
+  if (actor) {
+    writeAdminAudit({
+      actorId:     actor.id,
+      actorName:   actor.name,
+      action:      'announcement_deleted',
+      entityType:  'announcement',
+      entityId:    announcementId,
+      entityLabel: actor.title ?? null,
+    })
+  }
+  return { success: true }
 }
 
 /** Cron helper: returns scheduled announcements whose time has passed */
