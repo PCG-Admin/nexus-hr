@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useMemo } from "react"
 import { useAuth } from "@/lib/auth"
 import { useRouter } from "next/navigation"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
@@ -128,6 +128,25 @@ export default function PerformancePage() {
   const selectedCycle = cycles.find(c => c.id === selectedCycleId)
   const isMonthly     = selectedCycle?.type === "monthly"
   const isAnnual      = selectedCycle?.type === "annual"
+  const resolvedGateStatus = useMemo(() => {
+    if (!gateStatus) return null
+
+    // Only map entries where employee data actually resolved — don't override with UUIDs
+    const reviewNameMap = new Map<string, string>()
+    for (const review of allCycleReviews) {
+      if (review.employee) {
+        reviewNameMap.set(review.employeeId, `${review.employee.firstName} ${review.employee.lastName}`)
+      }
+    }
+
+    return {
+      ...gateStatus,
+      breakdown: gateStatus.breakdown.map(item => ({
+        ...item,
+        employeeName: reviewNameMap.get(item.employeeId) ?? item.employeeName,
+      })),
+    }
+  }, [gateStatus, allCycleReviews])
 
   const isManager   = ["line_manager", "hr_manager", "system_admin"].includes(user?.role ?? "")
   const isHR        = ["hr_manager", "system_admin"].includes(user?.role ?? "")
@@ -156,8 +175,8 @@ export default function PerformancePage() {
         isManager ? getTeamReviews(user.id, selectedCycleId) : Promise.resolve([]),
         isManager ? getTeamMembers(user.id) : Promise.resolve([]),
         canSeeGate ? getIncentiveGateStatus(selectedCycleId, cycleType) : Promise.resolve(null),
-        // HR needs ALL cycle reviews for sign-off, not just direct reports
-        isHR ? getCycleReviews(selectedCycleId) : Promise.resolve([]),
+        // HR needs ALL cycle reviews for sign-off; executive needs them for GM sign-off
+        (isHR || isExecutive) ? getCycleReviews(selectedCycleId) : Promise.resolve([]),
       ])
       setMyReview(mine)
       setTeamReviews(team)
@@ -1014,32 +1033,32 @@ export default function PerformancePage() {
         {/* ── Incentive Gate ─────────────────────────────────────────── */}
         {canSeeGate && !isMonthly && (
           <TabsContent value="gate" className="space-y-4">
-            {!gateStatus ? (
+            {!resolvedGateStatus ? (
               <Card>
                 <CardContent className="py-12 text-center text-muted-foreground">Loading gate status...</CardContent>
               </Card>
             ) : (
               <>
-                <Card className={gateStatus.blocked ? "border-red-200 bg-red-50/30" : "border-emerald-200 bg-emerald-50/30"}>
+                <Card className={resolvedGateStatus.blocked ? "border-red-200 bg-red-50/30" : "border-emerald-200 bg-emerald-50/30"}>
                   <CardContent className="pt-6 pb-6">
                     <div className="flex items-center gap-4">
-                      <div className={`w-14 h-14 rounded-full flex items-center justify-center shrink-0 ${gateStatus.blocked ? "bg-red-100" : "bg-emerald-100"}`}>
-                        {gateStatus.blocked ? <Lock className="w-7 h-7 text-red-600" /> : <CheckCircle2 className="w-7 h-7 text-emerald-600" />}
+                      <div className={`w-14 h-14 rounded-full flex items-center justify-center shrink-0 ${resolvedGateStatus.blocked ? "bg-red-100" : "bg-emerald-100"}`}>
+                        {resolvedGateStatus.blocked ? <Lock className="w-7 h-7 text-red-600" /> : <CheckCircle2 className="w-7 h-7 text-emerald-600" />}
                       </div>
                       <div>
-                        <p className={`text-lg font-bold ${gateStatus.blocked ? "text-red-700" : "text-emerald-700"}`}>
-                          Incentive Gate: {gateStatus.blocked ? "BLOCKED" : "CLEARED"}
+                        <p className={`text-lg font-bold ${resolvedGateStatus.blocked ? "text-red-700" : "text-emerald-700"}`}>
+                          Incentive Gate: {resolvedGateStatus.blocked ? "BLOCKED" : "CLEARED"}
                         </p>
                         <p className="text-sm text-muted-foreground mt-0.5">
-                          {selectedCycle?.name} · {gateStatus.approved} of {gateStatus.total} employees approved
+                          {selectedCycle?.name} · {resolvedGateStatus.approved} of {resolvedGateStatus.total} employees approved
                           {isAnnual && " (requires GM sign-off)"}
                         </p>
-                        {gateStatus.blocked && (
+                        {resolvedGateStatus.blocked && (
                           <p className="text-xs text-red-600 mt-1">
-                            Incentive processing is blocked until all {gateStatus.total} reviews are{isAnnual ? " GM-approved" : " HR-approved"}.
+                            Incentive processing is blocked until all {resolvedGateStatus.total} reviews are{isAnnual ? " GM-approved" : " HR-approved"}.
                           </p>
                         )}
-                        {!gateStatus.blocked && (
+                        {!resolvedGateStatus.blocked && (
                           <p className="text-xs text-emerald-600 mt-1">All reviews approved. Incentive processing may proceed.</p>
                         )}
                       </div>
@@ -1050,12 +1069,12 @@ export default function PerformancePage() {
                 <div className="space-y-2">
                   <div className="flex justify-between text-xs text-muted-foreground">
                     <span>Approval progress</span>
-                    <span>{gateStatus.approved}/{gateStatus.total}</span>
+                    <span>{resolvedGateStatus.approved}/{resolvedGateStatus.total}</span>
                   </div>
                   <div className="h-2 rounded-full bg-muted overflow-hidden">
                     <div
-                      className={`h-full rounded-full transition-all ${gateStatus.blocked ? "bg-amber-400" : "bg-emerald-500"}`}
-                      style={{ width: gateStatus.total > 0 ? `${(gateStatus.approved / gateStatus.total) * 100}%` : "0%" }}
+                      className={`h-full rounded-full transition-all ${resolvedGateStatus.blocked ? "bg-amber-400" : "bg-emerald-500"}`}
+                      style={{ width: resolvedGateStatus.total > 0 ? `${(resolvedGateStatus.approved / resolvedGateStatus.total) * 100}%` : "0%" }}
                     />
                   </div>
                 </div>
@@ -1074,7 +1093,7 @@ export default function PerformancePage() {
                         </tr>
                       </thead>
                       <tbody>
-                        {gateStatus.breakdown.map(b => (
+                        {resolvedGateStatus.breakdown.map(b => (
                           <tr key={b.employeeId} className="border-b last:border-0">
                             <td className="px-4 py-3 font-medium">{b.employeeName}</td>
                             <td className="px-4 py-3"><StatusBadge status={b.status} /></td>
@@ -1113,3 +1132,4 @@ export default function PerformancePage() {
     </>
   )
 }
+

@@ -815,7 +815,7 @@ export async function getAllLeaveBalances(year?: number): Promise<LeaveBalanceWi
   const supabase = createClient()
   const currentYear = year || new Date().getFullYear()
 
-  const [balancesResult, employeesResult] = await Promise.all([
+  const [balancesResult, employeesResult, requestsResult] = await Promise.all([
     supabase
       .from('leave_balances')
       .select('*, leave_types(name, color)')
@@ -824,9 +824,24 @@ export async function getAllLeaveBalances(year?: number): Promise<LeaveBalanceWi
     supabase
       .from('employees')
       .select('id, email, first_name, last_name, employee_number, department, role, grade, job_title, employment_type, hire_date, manager_id, phone, personal_email, address, city, postal_code, emergency_contact_name, emergency_contact_phone, emergency_contact_relationship, id_number, date_of_birth, is_active'),
+    supabase
+      .from('leave_requests')
+      .select('user_id, leave_type_id, days_requested')
+      .eq('status', 'approved')
+      .gte('start_date', `${currentYear}-01-01`)
+      .lte('start_date', `${currentYear}-12-31`),
   ])
 
   if (balancesResult.error || !balancesResult.data) return []
+
+  // Sum approved days per user+leave_type from live requests (same method as getLeaveBalances)
+  const usedByUserAndType: Record<string, number> = {}
+  if (requestsResult.data) {
+    for (const req of requestsResult.data) {
+      const key = `${req.user_id}:${req.leave_type_id}`
+      usedByUserAndType[key] = (usedByUserAndType[key] || 0) + req.days_requested
+    }
+  }
 
   type EmpRow = {
     id: string; email: string; first_name: string; last_name: string
@@ -850,14 +865,15 @@ export async function getAllLeaveBalances(year?: number): Promise<LeaveBalanceWi
     .map(row => {
       const emp = empMap.get(row.user_id)
       if (!emp) return null
+      const usedDays = usedByUserAndType[`${row.user_id}:${row.leave_type_id}`] || 0
       return {
         id: row.id,
         userId: row.user_id,
         leaveTypeId: row.leave_type_id,
         leaveTypeName: row.leave_types?.name || 'Unknown',
         totalDays: row.total_days,
-        usedDays: row.used_days,
-        availableDays: row.total_days - row.used_days,
+        usedDays,
+        availableDays: row.total_days - usedDays,
         year: row.year,
         color: row.leave_types?.color || null,
         employee: {

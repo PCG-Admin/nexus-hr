@@ -949,25 +949,39 @@ export async function getIncentiveGateStatus(
   }
   try {
     const supabase = createClient()
-    const { data, error } = await (supabase as any)
+
+    // Step 1 — fetch reviews (status + employee_id only, no FK join)
+    const { data: reviewData, error: reviewErr } = await (supabase as any)
       .from('performance_reviews')
-      .select(`
-        id, status, employee_id,
-        employee:employees!performance_reviews_employee_id_fkey(first_name, last_name)
-      `)
+      .select('id, employee_id, status')
       .eq('cycle_id', cycleId)
-    if (error) { console.error('getIncentiveGateStatus:', error) }
-    const reviews: any[] = data ?? []
-    const approved = reviews.filter(r => r.status === finalStatus).length
+    if (reviewErr) console.error('getIncentiveGateStatus reviews:', reviewErr)
+    const reviews: any[] = reviewData ?? []
+
+    // Step 2 — fetch employee names in a separate query
+    const empIds: string[] = [...new Set<string>(reviews.map((r: any) => r.employee_id as string))]
+    const empMap: Record<string, string> = {}
+    if (empIds.length > 0) {
+      const { data: emps, error: empErr } = await (supabase as any)
+        .from('employees')
+        .select('id, first_name, last_name')
+        .in('id', empIds)
+      if (empErr) console.error('getIncentiveGateStatus employees:', empErr)
+      for (const e of emps ?? []) {
+        empMap[e.id] = `${e.first_name} ${e.last_name}`
+      }
+    }
+
+    const approved = reviews.filter((r: any) => r.status === finalStatus).length
     return {
       cycleId,
       total:   reviews.length,
       approved,
       pending: reviews.length - approved,
       blocked: approved < reviews.length,
-      breakdown: reviews.map(r => ({
+      breakdown: reviews.map((r: any) => ({
         employeeId:   r.employee_id,
-        employeeName: r.employee ? `${r.employee.first_name} ${r.employee.last_name}` : r.employee_id,
+        employeeName: empMap[r.employee_id] ?? r.employee_id,
         status:       r.status as ReviewStatus,
       })),
     }
