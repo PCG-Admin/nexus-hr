@@ -15,7 +15,7 @@ export function LeaveRequestList({ requests, onRequestClick }: Props) {
       case "approved":      return "bg-emerald-100 text-emerald-800 border-emerald-300"
       case "rejected":      return "bg-red-100 text-red-800 border-red-300"
       case "pending":       return "bg-amber-100 text-amber-800 border-amber-300"
-      case "pending_ceo":   return "bg-blue-100 text-blue-800 border-blue-300"
+      case "pending_hr":   return "bg-blue-100 text-blue-800 border-blue-300"
       case "cancelled":     return "bg-slate-100 text-slate-800 border-slate-300"
       default:              return "bg-slate-100 text-slate-800 border-slate-300"
     }
@@ -23,7 +23,7 @@ export function LeaveRequestList({ requests, onRequestClick }: Props) {
 
   const getStatusLabel = (status: string) => {
     switch (status) {
-      case "pending_ceo": return "Awaiting Final Approval"
+      case "pending_hr": return "Awaiting Final Approval"
       default:            return status.charAt(0).toUpperCase() + status.slice(1)
     }
   }

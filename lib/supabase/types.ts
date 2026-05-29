@@ -1,5 +1,5 @@
 export type UserRole        = "employee" | "line_manager" | "hr_manager" | "executive" | "system_admin"
-export type LeaveStatus     = "pending" | "pending_ceo" | "approved" | "rejected" | "cancelled"
+export type LeaveStatus     = "pending" | "pending_hr" | "approved" | "rejected" | "cancelled"
 export type EmploymentType  = "permanent" | "fixed_term" | "probation"
 export type DisciplinaryType   = "verbal_warning" | "written_warning" | "final_warning" | "dismissal"
 export type DisciplinaryStatus = "draft" | "finalised"

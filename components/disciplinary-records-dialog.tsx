@@ -136,7 +136,7 @@ export function DisciplinaryRecordsDialog({ employee, isOpen, onClose }: Props) 
 
     let docUrl: string | null = null
     if (docFile) {
-      const upload = await uploadDisciplinaryDocument(docFile, employee.id)
+      const upload = await uploadDisciplinaryDocument(docFile, employee.id, form.type || undefined, form.incidentDate || undefined)
       if (!upload.success) { setError(upload.error ?? "Failed to upload document."); setIsSaving(false); return }
       docUrl = upload.url ?? null
     }
@@ -189,7 +189,7 @@ export function DisciplinaryRecordsDialog({ employee, isOpen, onClose }: Props) 
 
     let docUrl: string | null = activeRecord.documentUrl
     if (docFile) {
-      const upload = await uploadDisciplinaryDocument(docFile, employee!.id)
+      const upload = await uploadDisciplinaryDocument(docFile, employee!.id, form.type || undefined, form.incidentDate || undefined)
       if (!upload.success) { setError(upload.error ?? "Failed to upload document."); setIsSaving(false); return }
       docUrl = upload.url ?? null
     } else if (!docPreview) {

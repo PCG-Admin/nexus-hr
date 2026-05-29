@@ -164,7 +164,7 @@ export function TeamCalendar({ requests, onRequestClick }: Props) {
                 {visible.map(req => {
                   const color     = employeeColorMap.get(req.userId) ?? COLORS[0]
                   const initials  = `${req.employee.firstName[0]}${req.employee.lastName[0]}`.toUpperCase()
-                  const isPending = req.status === "pending" || req.status === "pending_ceo"
+                  const isPending = req.status === "pending" || req.status === "pending_hr"
                   return (
                     <button
                       key={req.id}

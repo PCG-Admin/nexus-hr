@@ -95,11 +95,11 @@ export default function ApprovalsPage() {
   // hr_manager and system_admin are final approvers; line_manager does stage-1
   const isFinalApprover = user?.role === "hr_manager" || user?.role === "system_admin"
 
-  // Line managers act on "pending"; final approvers act on "pending_ceo" (pending final approval)
+  // Line managers act on "pending"; final approvers act on "pending_hr" (pending final approval)
   const actionablePending = isFinalApprover
-    ? allRequests.filter((r) => r.status === "pending_ceo")
+    ? allRequests.filter((r) => r.status === "pending_hr")
     : allRequests.filter((r) => r.status === "pending")
-  const awaitingCeoRequests = allRequests.filter((r) => r.status === "pending_ceo")
+  const awaitingCeoRequests = allRequests.filter((r) => r.status === "pending_hr")
   const approvedRequests = allRequests.filter((r) => r.status === "approved")
   const rejectedRequests = allRequests.filter((r) => r.status === "rejected")
 

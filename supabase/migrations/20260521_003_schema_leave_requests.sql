@@ -11,7 +11,7 @@ CREATE TABLE IF NOT EXISTS public.leave_requests (
   days_requested      NUMERIC(5,1) NOT NULL,
   reason              TEXT,
   status              TEXT         NOT NULL DEFAULT 'pending'
-                                   CHECK (status IN ('pending','pending_ceo','approved','rejected','cancelled')),
+                                   CHECK (status IN ('pending','pending_hr','approved','rejected','cancelled')),
   is_override         BOOLEAN      NOT NULL DEFAULT FALSE,
   reviewer_id         UUID         REFERENCES public.employees(id),
   reviewer_notes      TEXT,

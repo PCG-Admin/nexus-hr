@@ -128,15 +128,18 @@ export async function getEmployeeDisciplinaryRecords(employeeId: string): Promis
 
 export async function uploadDisciplinaryDocument(
   file: File,
-  employeeId: string
+  employeeId: string,
+  incidentType?: string,
+  incidentDate?: string,
 ): Promise<{ success: boolean; url?: string; error?: string }> {
   const supabase = createClient()
   const ext = file.name.split('.').pop()
-  const path = `disciplinary/${employeeId}/${Date.now()}.${ext}`
-  const { data, error } = await supabase.storage.from('leave-documents').upload(path, file)
+  const typeSlug = incidentType ? incidentType.replace(/_/g, '-') : 'document'
+  const datePart = incidentDate ?? new Date().toISOString().slice(0, 10)
+  const path = `disciplinary/${employeeId}/${typeSlug}-${datePart}.${ext}`
+  const { error } = await supabase.storage.from('leave-documents').upload(path, file, { upsert: true })
   if (error) return { success: false, error: error.message }
-  const { data: urlData } = supabase.storage.from('leave-documents').getPublicUrl(data.path)
-  return { success: true, url: urlData.publicUrl }
+  return { success: true, url: `/api/documents/${path}` }
 }
 
 export async function createDisciplinaryRecord(record: {
@@ -253,4 +256,52 @@ export async function finaliseDisciplinaryRecord(
   })
 
   return { success: true }
+}
+
+// ── Admin reporting ───────────────────────────────────────────────────────────
+
+export type DisciplinaryRecordWithEmployee = DisciplinaryRecord & {
+  employee: { id: string; firstName: string; lastName: string; department: string | null }
+}
+
+export async function getAllDisciplinaryRecords(): Promise<DisciplinaryRecordWithEmployee[]> {
+  if (!isDbConfigured()) return []
+  const supabase = createClient()
+
+  const [recordsResult, employeesResult] = await Promise.all([
+    (supabase as any).from('disciplinary_records').select('*').order('incident_date', { ascending: false }),
+    (supabase as any).from('employees').select('id, first_name, last_name, department'),
+  ])
+
+  if (recordsResult.error || !recordsResult.data) return []
+
+  const empMap = new Map<string, { id: string; firstName: string; lastName: string; department: string | null }>(
+    ((employeesResult.data ?? []) as any[]).map((e: any) => [
+      e.id,
+      { id: e.id, firstName: e.first_name, lastName: e.last_name, department: e.department ?? null },
+    ])
+  )
+
+  return (recordsResult.data as any[])
+    .map((row: any) => {
+      const emp = empMap.get(row.employee_id)
+      if (!emp) return null
+      return {
+        id:            row.id,
+        employeeId:    row.employee_id,
+        type:          row.type as DisciplinaryType,
+        incidentDate:  row.incident_date,
+        hearingDate:   row.hearing_date ?? null,
+        description:   row.description,
+        outcome:       row.outcome ?? null,
+        status:        row.status as 'draft' | 'finalised',
+        documentUrl:   row.document_url ?? null,
+        createdBy:     row.created_by,
+        createdByName: row.created_by_name,
+        createdAt:     row.created_at,
+        updatedAt:     row.updated_at,
+        employee:      emp,
+      }
+    })
+    .filter((r): r is DisciplinaryRecordWithEmployee => r !== null)
 }

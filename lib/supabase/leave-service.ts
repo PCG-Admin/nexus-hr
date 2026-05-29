@@ -126,7 +126,7 @@ export type LeaveRequest = {
   endDate: string
   daysRequested: number
   reason: string | null
-  status: 'pending' | 'pending_ceo' | 'approved' | 'rejected' | 'cancelled'
+  status: 'pending' | 'pending_hr' | 'approved' | 'rejected' | 'cancelled'
   reviewerId: string | null
   reviewerNotes: string | null
   reviewedAt: string | null
@@ -245,9 +245,9 @@ export async function submitLeaveRequest(request: {
   // Determine initial status:
   // 1. Elevated roles always bypass manager stage
   // 2. Leave types with requires_manager_approval = false go direct to HR queue
-  // 3. Otherwise standard two-stage: pending → manager → pending_ceo → HR
+  // 3. Otherwise standard two-stage: pending → manager → pending_hr → HR
   const isElevatedRole = request.userRole === 'line_manager' || request.userRole === 'hr_manager' || request.userRole === 'system_admin'
-  let initialStatus: 'pending' | 'pending_ceo' = isElevatedRole ? 'pending_ceo' : 'pending'
+  let initialStatus: 'pending' | 'pending_hr' = isElevatedRole ? 'pending_hr' : 'pending'
   if (!isElevatedRole && initialStatus === 'pending') {
     const { data: ltRow } = await supabase
       .from('leave_types')
@@ -255,7 +255,7 @@ export async function submitLeaveRequest(request: {
       .eq('id', request.leaveTypeId)
       .single()
     if (ltRow && ltRow.requires_manager_approval === false) {
-      initialStatus = 'pending_ceo'
+      initialStatus = 'pending_hr'
     }
   }
 
@@ -513,7 +513,7 @@ export async function getAllLeaveRequests(): Promise<LeaveRequestWithEmployee[]>
     .filter((r): r is LeaveRequestWithEmployee => r !== null)
 }
 
-// Manager stage-1 approval — moves request to pending_ceo and notifies HR/admin
+// Manager stage-1 approval — moves request to pending_hr and notifies HR/admin
 export async function managerApproveLeaveRequest(
   requestId: string,
   managerId: string,
@@ -525,7 +525,7 @@ export async function managerApproveLeaveRequest(
   const { error } = await supabase
     .from('leave_requests')
     .update({
-      status: 'pending_ceo',
+      status: 'pending_hr',
       manager_reviewer_id: managerId,
       manager_reviewed_at: new Date().toISOString(),
       reviewer_notes: notes || null,
@@ -544,7 +544,7 @@ export async function managerApproveLeaveRequest(
     actorName:      names?.managerName || 'Manager',
     action:         'manager_approved',
     fromStatus:     'pending',
-    toStatus:       'pending_ceo',
+    toStatus:       'pending_hr',
     notes:          notes ?? null,
   })
 
@@ -598,7 +598,7 @@ export async function approveLeaveRequest(
     actorId:        reviewerId,
     actorName:      reviewerName || 'HR / Admin',
     action:         'approved',
-    fromStatus:     'pending_ceo',
+    fromStatus:     'pending_hr',
     toStatus:       'approved',
     notes:          notes ?? null,
   })
